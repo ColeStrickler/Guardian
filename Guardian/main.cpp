@@ -68,10 +68,13 @@ void PushItem(LIST_ENTRY* entry, LIST_ENTRY* ListHead, FastMutex& Mutex, int& co
 	AutoLock<FastMutex> lock(Mutex);
 
 	// too many items, remove oldest
-	if (g_Struct.AlertCount > 1024) {
+	if (count > 1024) {
 		auto head = RemoveHeadList(ListHead);
-		g_Struct.AlertCount--;
+		count--;
 		auto item = CONTAINING_RECORD(head, Alert<Header>, Entry);
+		
+
+
 		ExFreePool(item);
 	}
 	InsertTailList(ListHead, entry);
@@ -579,7 +582,6 @@ NTSTATUS IoControl(PDEVICE_OBJECT, PIRP Irp) {
 	{
 		// DIRECT IO BECAUSE THIS COULD BE A LARGE BUFFER
 		NT_ASSERT(Irp->MdlAddress);
-		auto len = stack->Parameters.DeviceIoControl.InputBufferLength;
 		auto buffer = (UCHAR*)MmGetSystemAddressForMdlSafe(Irp->MdlAddress, NormalPagePriority);
 
 		if (!buffer) {
@@ -593,7 +595,7 @@ NTSTATUS IoControl(PDEVICE_OBJECT, PIRP Irp) {
 			{
 				ULONG allocSize = sizeof(WorkItem<ScanFileHeaderJob>);
 				auto ReadInFileJob = (ScanFileHeaderJob*)buffer;
-				size_t filePathLen = ReadInFileJob->FilePathLength;
+				ULONG filePathLen = ReadInFileJob->FilePathLength;
 				allocSize += filePathLen;
 
 				auto NewScanFileJob = (WorkItem<ScanFileHeaderJob>*)ExAllocatePoolWithTag(NonPagedPool, allocSize, DRIVER_TAG);

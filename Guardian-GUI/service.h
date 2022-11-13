@@ -36,7 +36,7 @@ struct ScanProcessHeaderJob : TaskHeader {
 };
 
 struct ScanFileHeaderJob : TaskHeader {
-	size_t FilePathLength;
+	ULONG FilePathLength;
 	ULONG FilePathOffset;
 };
 

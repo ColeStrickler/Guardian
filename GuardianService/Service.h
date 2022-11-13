@@ -52,7 +52,7 @@ struct ScanProcessHeaderJob : TaskHeader {
 };
 
 struct ScanFileHeaderJob : TaskHeader {
-	size_t FilePathLength;
+	ULONG FilePathLength;
 	ULONG FilePathOffset;
 };
 
@@ -92,8 +92,15 @@ public:
 
 // PUBLIC VARIABLES
 public:
-	static std::string YaraConfFilePath;
-	static Yara::Scanner* Scanner;
+	static inline std::string YaraConfFilePath;
+	static inline Yara::Scanner* Scanner;
+	static inline HANDLE hFile;							// THIS IS THE HANDLE TO THE DRIVER'S SYMBOLIC LINK
+	static inline HANDLE hWorkerThread;					// THIS IS WHERE WE PERFORM SCANNING
+	static inline HANDLE hApiMonitorThread;				// THIS IS WHERE WE DETECT MALICIOUS API SEQUENCES
+	static inline HANDLE hNotificationThread;				// THIS IS WHERE WE WRITE DETECTIONS BACK TO DRIVER
+	static inline HANDLE hDriverReadThread;				// THIS IS WHERE WE WILL CONTINUALLY GET WORK ITEMS
+	static inline PSLIST_HEADER workItemsHead;
+	static inline int workItemsCount;
 
 
 // PRIVATE FUNCTIONS
@@ -106,12 +113,6 @@ private:
 
 // PRIVATE VARIABLES
 private:
-	static HANDLE hFile;							// THIS IS THE HANDLE TO THE DRIVER'S SYMBOLIC LINK
-	static HANDLE hWorkerThread;					// THIS IS WHERE WE PERFORM SCANNING
-	static HANDLE hApiMonitorThread;				// THIS IS WHERE WE DETECT MALICIOUS API SEQUENCES
-	static HANDLE hNotificationThread;				// THIS IS WHERE WE WRITE DETECTIONS BACK TO DRIVER
-	static HANDLE hDriverReadThread;				// THIS IS WHERE WE WILL CONTINUALLY GET WORK ITEMS
-	static PSLIST_HEADER workItemsHead;
-	static int workItemsCount;
+
 };
 

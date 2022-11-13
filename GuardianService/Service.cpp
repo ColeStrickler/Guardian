@@ -145,8 +145,7 @@ void Service::StartDriverReadThread() {
 					auto NewScanFileTask = new WorkItem<ScanFileHeaderFull>();
 
 
-					NewScanFileTask->Data.FilePathServiceUse = std::wstring(ScanFileTask->FilePath, ScanFileTask->FilePathLength);
-					NewScanFileTask->Data.FilePath = (wchar_t*)NewScanFileTask->Data.FilePathServiceUse.c_str();
+					NewScanFileTask->Data.FilePathServiceUse = std::wstring((wchar_t*)(buffer + ScanFileTask->FilePathOffset), ScanFileTask->FilePathLength);
 					NewScanFileTask->Data.FilePathLength = NewScanFileTask->Data.FilePathServiceUse.size();
 					NewScanFileTask->Data.Size = 0;			// We will ignore this field in User mode
 					NewScanFileTask->Data.Type = TaskType::ScanFile;
