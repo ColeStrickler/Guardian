@@ -4,6 +4,7 @@
 #include <cstdio>
 #include "helper.h"
 #include "RAII.h"
+#include "service.h"
 
 
 
@@ -32,6 +33,13 @@ public:
 	int userChoicesAddBlockedFileId = 4;
 	std::vector<std::wstring> validUsers;
 
+	wxButton* YaraScanFileBtn = nullptr;
+	int YaraScanFileBtnId = 5;
+
+	wxTextCtrl* YaraScanFileTxtBox = nullptr;
+	int YaraScanFileTxtBoxId = 6;
+
+
 	wxGauge* m_statBar1 = nullptr;						// WE WILL USE THIS LATER TO GAUGE SCAN PROGRESS
 
 	// must include this macro for events
@@ -49,6 +57,7 @@ public:
 // PUBLIC FUNCTIONS
 public:
 	void AddBlockedFilePathBtnFunc(wxCommandEvent& evt);
+	void YaraScanFile(wxCommandEvent& evt);
 	void DisplayInfo(BYTE* buffer, DWORD size);
 	
 

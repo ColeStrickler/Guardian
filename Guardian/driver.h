@@ -2,6 +2,7 @@
 #include <ntifs.h>
 #include "primitives.h"
 #include "common.h"
+#include "service.h"
 
 
 

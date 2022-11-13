@@ -4,6 +4,7 @@
 wxBEGIN_EVENT_TABLE(cMain, wxFrame)
 // link an id to a function
 EVT_BUTTON(10001, AddBlockedFilePathBtnFunc)
+EVT_BUTTON(10002, YaraScanFile)
 
 wxEND_EVENT_TABLE()
 
@@ -12,7 +13,8 @@ wxEND_EVENT_TABLE()
 
 
 
-void cMain::DisplayInfo(BYTE* buffer, DWORD size) {
+void cMain::DisplayInfo(BYTE* buffer, DWORD size) 
+{
     auto count = size;
     while (count > 0) {
         auto header = (Header*)buffer;
@@ -84,7 +86,8 @@ void cMain::DisplayInfo(BYTE* buffer, DWORD size) {
 }
 
 
-void cMain::displayEventThread(cMain* main) {
+void cMain::displayEventThread(cMain* main) 
+{
 
     while (true) {
         BYTE buffer[1 << 16];
@@ -107,7 +110,8 @@ void cMain::displayEventThread(cMain* main) {
 }
 
 
-void cMain::initUserArray(std::vector<std::wstring> users) {
+void cMain::initUserArray(std::vector<std::wstring> users) 
+{
     int i = 0;
     for (auto& u : users) {
         userChoicesAddBlockedFile->Append(wxString(u));
@@ -117,7 +121,8 @@ void cMain::initUserArray(std::vector<std::wstring> users) {
 }
 
 
-cMain::cMain() : wxFrame(nullptr, wxID_ANY, "Guardian", wxPoint(30, 30), wxSize(1200, 1800)) {
+cMain::cMain() : wxFrame(nullptr, wxID_ANY, "Guardian", wxPoint(30, 30), wxSize(1200, 1800)) 
+{
 
     hFile = CreateFile(L"\\\\.\\guardian", GENERIC_READ, 0, nullptr, OPEN_EXISTING, 0, nullptr);
     if (hFile == INVALID_HANDLE_VALUE) {
@@ -131,7 +136,13 @@ cMain::cMain() : wxFrame(nullptr, wxID_ANY, "Guardian", wxPoint(30, 30), wxSize(
     userChoicesAddBlockedFile = new wxComboBox(this, wxID_ANY, wxString("<select user>"), wxPoint(410, 20), wxSize(200, 20));
     initUserArray(listUsers());
     AddBlockedFileBtn = new wxButton(this, 10001, "Add new blocked file path", wxPoint(10, 20), wxSize(200, 20));
-	AddBlockedFileTxtBox = new wxTextCtrl(this, wxID_ANY, "", wxPoint(210, 20), wxSize(200, 20));
+	AddBlockedFileTxtBox = new wxTextCtrl(this, wxID_ANY, "<file path>", wxPoint(210, 20), wxSize(200, 20));
+
+    
+    // YARA SCAN FILE BUTTON
+    YaraScanFileBtn = new wxButton(this, 10002, "Yara scan a file", wxPoint(10, 40), wxSize(200, 20));
+    YaraScanFileTxtBox = new wxTextCtrl(this, wxID_ANY, "<file path>", wxPoint(210, 40), wxSize(200, 20));
+
 
 
     // EVENT/ALERT FEED
@@ -143,7 +154,8 @@ cMain::~cMain() {
     CloseHandle(hFile);
 }
 
-int checkExistingBlockedFilePath(HANDLE HandleBlockedPathConfigFile, std::string FilePath, std::string& outString) {
+int checkExistingBlockedFilePath(HANDLE HandleBlockedPathConfigFile, std::string FilePath, std::string& outString) 
+{
     DWORD size{ 0 };
     size = GetFileSize(HandleBlockedPathConfigFile, NULL);
     BYTE* configFile = RAII::HeapBuffer(size).Get();
@@ -193,7 +205,8 @@ int checkExistingBlockedFilePath(HANDLE HandleBlockedPathConfigFile, std::string
 
 
 
-void cMain::AddBlockedFilePathBtnFunc(wxCommandEvent& evt) {
+void cMain::AddBlockedFilePathBtnFunc(wxCommandEvent& evt) 
+{
     std::string filePath = std::string((AddBlockedFileTxtBox->GetValue()).mb_str());
     bool check = DirExists(filePath.c_str());
     if (!check) {
@@ -294,5 +307,55 @@ void cMain::AddBlockedFilePathBtnFunc(wxCommandEvent& evt) {
         AddBlockedFileTxtBox->AppendText(successText);
     }
 	evt.Skip(); // call this to end the event
+    return;
+}
+
+
+void cMain::YaraScanFile(wxCommandEvent& evt) {
+    std::wstring filePath = std::wstring((YaraScanFileTxtBox->GetValue()).wc_str());
+    bool check = FileExists(filePath.c_str());
+    if (!check) {
+        MessageBoxA(NULL, "File does not exist.", "Error", MB_ICONERROR | MB_DEFBUTTON1);
+        evt.Skip();
+        return;
+    }
+
+    DWORD allocSize = sizeof(ScanFileHeaderJob) + filePath.size();
+    auto buffer = RAII::HeapBuffer(allocSize).Get();
+    if (buffer == nullptr) {
+        MessageBoxA(NULL, "Unable to allocate heap for IO.", "Error", MB_ICONERROR | MB_DEFBUTTON1);
+        evt.Skip();
+        return;
+    }
+
+    ScanFileHeaderJob* NewScanFileJob = (ScanFileHeaderJob*)buffer;
+    NewScanFileJob->Type = TaskType::ScanFile;
+    NewScanFileJob->FilePathOffset = sizeof(ScanFileHeaderJob);
+    NewScanFileJob->FilePathLength = filePath.size();
+    NewScanFileJob->Size = sizeof(ScanFileHeaderJob) + filePath.size();
+    memcpy(buffer + sizeof(ScanFileHeaderJob), filePath.data(), filePath.size());
+
+    DWORD retBytes;
+    check = DeviceIoControl(
+        hFile,
+        IOCTL_WRITE_WORKITEM,
+        &NewScanFileJob,
+        allocSize,
+        nullptr,
+        0,
+        &retBytes,
+        0
+    );
+
+    if (check) {
+        YaraScanFileTxtBox->Clear();
+        YaraScanFileTxtBox->AppendText(wxString("Started scan successfully."));
+    }
+    else {
+        YaraScanFileTxtBox->Clear();
+        YaraScanFileTxtBox->AppendText(wxString("Unable to start scan."));
+    }
+
+    evt.Skip();
     return;
 }

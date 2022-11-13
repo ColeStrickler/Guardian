@@ -3,8 +3,12 @@
 #include <string>
 #include <vector>
 #include <algorithm>
+#include "RAII.h"
 
-inline std::string ConvToLowerA(std::string a);
+std::string ConvToLowerA(std::string a);
 
 
-inline BOOL VectorContainsStringA(std::vector<std::string> haystack, std::string needle);
+BOOL VectorContainsStringA(std::vector<std::string> haystack, std::string needle);
+
+
+std::string WstringToString(std::wstring wstr);

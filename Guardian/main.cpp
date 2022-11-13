@@ -14,14 +14,25 @@ void OnImageLoadNotify(PUNICODE_STRING FullImageName, HANDLE ProcessId, PIMAGE_I
 
 
 struct Globals {
+	// ALERT NOTIFICATIONS SLL
 	LIST_ENTRY AlertsHead{0};
 	int AlertCount{0};
 	FastMutex AlertsHeadMutex;
-	RTL_OSVERSIONINFOW versionInfo{0};
-	ConfigFiles ConfigurationFiles{0};
+
+	// BLOCKED PATH CONFIG SLL
 	LIST_ENTRY BlockedPathsHead{0};
 	int BlockedPathsCount{0};
 	FastMutex BlockedPathsMutex;
+
+	// SERVICE WORK ITEMS SLL
+	LIST_ENTRY ServiceWorkItemsHead{ 0 };
+	int ServiceWorkItemsCount{ 0 };
+	FastMutex ServiceWorkItemsMutex;
+	
+	// OTHER GLOBAL CONFIG
+	RTL_OSVERSIONINFOW versionInfo{ 0 };
+	ConfigFiles ConfigurationFiles{ 0 };
+
 };
 
 
@@ -175,8 +186,10 @@ DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING) {
 
 	InitializeListHead(&g_Struct.AlertsHead);
 	InitializeListHead(&g_Struct.BlockedPathsHead);
+	InitializeListHead(&g_Struct.ServiceWorkItemsHead);
 	g_Struct.AlertsHeadMutex.Init();
 	g_Struct.BlockedPathsMutex.Init();
+	g_Struct.ServiceWorkItemsMutex.Init();
 	RtlGetVersion(&g_Struct.versionInfo);
 	KdPrint(("Version %d.%d.%d found!", g_Struct.versionInfo.dwMajorVersion, g_Struct.versionInfo.dwMinorVersion, g_Struct.versionInfo.dwBuildNumber));
 	
@@ -510,12 +523,18 @@ void OnThreadNotify(HANDLE ProcessId, HANDLE ThreadId, BOOLEAN Create) {
 NTSTATUS IoControl(PDEVICE_OBJECT, PIRP Irp) {
 	NTSTATUS status = STATUS_SUCCESS;
 	auto stack = IoGetCurrentIrpStackLocation(Irp);
-	auto len = stack->Parameters.DeviceIoControl.InputBufferLength;
+	auto count = 0;
+
 	KdPrint(("Control Code: 0x%8X", stack->Parameters.DeviceIoControl.IoControlCode));
+	
 	switch (stack->Parameters.DeviceIoControl.IoControlCode)
 	{
+
+		// ADD A FILE PATH TO THE BLACKLIST
+		// NEED TO MAKE THIS ON A PER USER BASIS IN THE FUTURE
 	case IOCTL_ADDFILE_BLACKLIST:
 	{
+		auto len = stack->Parameters.DeviceIoControl.InputBufferLength;
 		if (len <= 0 || len > 260) { // check path size
 			status = STATUS_INVALID_PARAMETER;
 			break;
@@ -554,12 +573,189 @@ NTSTATUS IoControl(PDEVICE_OBJECT, PIRP Irp) {
 		}
 		break;
 	}
+
+	// FROM HERE, THE GUI MANAGER WILL WRITE IN NEW WORK ITEMS
+	case IOCTL_WRITE_WORKITEM:
+	{
+		// DIRECT IO BECAUSE THIS COULD BE A LARGE BUFFER
+		NT_ASSERT(Irp->MdlAddress);
+		auto len = stack->Parameters.DeviceIoControl.InputBufferLength;
+		auto buffer = (UCHAR*)MmGetSystemAddressForMdlSafe(Irp->MdlAddress, NormalPagePriority);
+
+		if (!buffer) {
+			status = STATUS_INSUFFICIENT_RESOURCES;
+			break;
+		}
+		auto type = ((TaskHeader*)(buffer))->Type;
+
+		switch (type) {
+			case TaskType::ScanFile:
+			{
+				ULONG allocSize = sizeof(WorkItem<ScanFileHeaderJob>);
+				auto ReadInFileJob = (ScanFileHeaderJob*)buffer;
+				size_t filePathLen = ReadInFileJob->FilePathLength;
+				allocSize += filePathLen;
+
+				auto NewScanFileJob = (WorkItem<ScanFileHeaderJob>*)ExAllocatePoolWithTag(NonPagedPool, allocSize, DRIVER_TAG);
+				if (NewScanFileJob == nullptr) {
+					KdPrint((DRIVER_PREFIX "[IOCTL_WRITE_ITEM] Unable to allocate pool."));
+					status = STATUS_INSUFFICIENT_RESOURCES;
+				}
+
+				NewScanFileJob->Data.Size = allocSize;
+				NewScanFileJob->Data.Type = TaskType::ScanFile;
+				NewScanFileJob->Data.FilePathLength = filePathLen;
+				NewScanFileJob->Data.FilePathOffset = sizeof(WorkItem<ScanFileHeaderJob>);
+				memcpy((UCHAR*)NewScanFileJob + sizeof(WorkItem<ScanFileHeaderJob>), buffer + ReadInFileJob->FilePathOffset, filePathLen);
+
+				PushItem(&NewScanFileJob->Entry, &g_Struct.ServiceWorkItemsHead, g_Struct.ServiceWorkItemsMutex, g_Struct.ServiceWorkItemsCount);
+				break;
+			}
+			
+			case TaskType::ScanProcess:
+			{
+				ULONG allocSize = sizeof(WorkItem<ScanProcessHeaderJob>);
+				auto ReadInProcessJob = (ScanProcessHeaderJob*)buffer;
+
+				auto NewScanProcessJob = (WorkItem<ScanProcessHeaderJob>*)ExAllocatePoolWithTag(NonPagedPool, allocSize, DRIVER_TAG);
+				if (NewScanProcessJob == nullptr) {
+					KdPrint((DRIVER_PREFIX "[IOCTL_WRITE_ITEM] Unable to allocate pool."));
+					status = STATUS_INSUFFICIENT_RESOURCES;
+				}
+
+				NewScanProcessJob->Data.Size = sizeof(WorkItem<ScanProcessHeaderJob>);
+				NewScanProcessJob->Data.ProcessId = ReadInProcessJob->ProcessId;
+				NewScanProcessJob->Data.Type = TaskType::ScanProcess;
+
+				PushItem(&NewScanProcessJob->Entry, &g_Struct.ServiceWorkItemsHead, g_Struct.ServiceWorkItemsMutex, g_Struct.ServiceWorkItemsCount);
+				break;
+			}
+
+			case TaskType::SystemScan:
+			{
+				ULONG allocSize = sizeof(WorkItem<SystemScanHeaderJob>);
+				auto ReadInProcessJob = (SystemScanHeaderJob*)buffer;
+
+				auto NewSystemScanJob = (WorkItem<SystemScanHeaderJob>*)ExAllocatePoolWithTag(NonPagedPool, allocSize, DRIVER_TAG);
+				if (NewSystemScanJob == nullptr) {
+					KdPrint((DRIVER_PREFIX "[IOCTL_WRITE_ITEM] Unable to allocate pool."));
+					status = STATUS_INSUFFICIENT_RESOURCES;
+				}
+
+				NewSystemScanJob->Data.ScanType = ReadInProcessJob->ScanType;
+				NewSystemScanJob->Data.Size = sizeof(WorkItem<SystemScanHeaderJob>);
+				NewSystemScanJob->Data.Type = TaskType::SystemScan;
+				
+				PushItem(&NewSystemScanJob->Entry, &g_Struct.ServiceWorkItemsHead, g_Struct.ServiceWorkItemsMutex, g_Struct.ServiceWorkItemsCount);
+				break;
+			}
+
+			default:
+				status = STATUS_INVALID_DEVICE_REQUEST;
+				break;
+		}
+	}
+
+
+	// FROM HERE, THE SERVICE COMPONENT WILL READ WORK ITEMS FROM THE DRIVER
+	case IOCTL_READ_WORKITEMS:
+	{
+		// DIRECT IO BECAUSE THIS COULD BE A LARGE BUFFER
+		NT_ASSERT(Irp->MdlAddress);
+		auto len = stack->Parameters.DeviceIoControl.OutputBufferLength;
+		auto buffer = (UCHAR*)MmGetSystemAddressForMdlSafe(Irp->MdlAddress, NormalPagePriority);
+		if (!buffer) {
+			status = STATUS_INSUFFICIENT_RESOURCES;
+			break;
+		}
+
+
+		AutoLock<FastMutex> lock(g_Struct.ServiceWorkItemsMutex);
+		while (true) {
+			if (IsListEmpty(&g_Struct.ServiceWorkItemsHead)) {
+				break;
+			}
+			auto entry = RemoveHeadList(&g_Struct.ServiceWorkItemsHead);
+			TaskType type = *(TaskType*)((uintptr_t)entry + sizeof(LIST_ENTRY));
+
+
+			switch (type) {
+				case TaskType::ScanFile:
+				{
+					auto info = CONTAINING_RECORD(entry, WorkItem<ScanFileHeaderJob>, Entry);
+					auto size = info->Data.Size;
+
+					if (len < size) {
+						InsertHeadList(&g_Struct.ServiceWorkItemsHead, entry);
+						break;
+					}
+
+					g_Struct.ServiceWorkItemsCount--;
+					memcpy(buffer, &info->Data, size);
+					len -= size;
+					buffer += size;
+					count += size;
+
+					ExFreePool(info);
+					break;
+				}
+
+				case TaskType::ScanProcess:
+				{
+					auto info = CONTAINING_RECORD(entry, WorkItem<ScanProcessHeaderJob>, Entry);
+					auto size = info->Data.Size;
+
+					if (len < size) {
+						InsertHeadList(&g_Struct.ServiceWorkItemsHead, entry);
+						break;
+					}
+
+					g_Struct.ServiceWorkItemsCount--;
+					memcpy(buffer, &info->Data, size);
+					len -= size;
+					buffer += size;
+					count += size;
+
+					ExFreePool(info);
+					break;
+
+				}
+
+				case TaskType::SystemScan:
+				{
+					auto info = CONTAINING_RECORD(entry, WorkItem<SystemScanHeaderJob>, Entry);
+					auto size = info->Data.Size;
+
+					if (len < size) {
+						InsertHeadList(&g_Struct.ServiceWorkItemsHead, entry);
+						break;
+					}
+
+					g_Struct.ServiceWorkItemsCount--;
+					memcpy(buffer, &info->Data, size);
+					len -= size;
+					buffer += size;
+					count += size;
+
+					ExFreePool(info);
+					break;
+				}
+				default:
+					KdPrint(("Invalid type found when reading Task items to service\n"));
+					break;
+			}
+		}
+		break;
+	}
+
+
+
 	default:
 		status = STATUS_INVALID_DEVICE_REQUEST;
 		break;
 	}
 
-	CompleteIrp(Irp, status);
+	CompleteIrp(Irp, status, count);
 	return status;
 }
 

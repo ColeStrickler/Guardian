@@ -3,6 +3,10 @@
 #include <vector>
 #include <string>
 #include "RAII.h"
+#include "YaraAgent.h"
+
+// TEMP
+#include <iostream>
 
 
 #ifdef DEBUG
@@ -12,8 +16,8 @@
 #endif
 
 
-#define IOCTL_READ_WORKITEMS CTL_CODE(0x8000, 0x801, METHOD_NEITHER, FILE_ANY_ACCESS)
-#define IOCTL_WRITE_ALERT CTL_CODE(0x8000, 0x802, METHOD_NEITHER, FILE_ANY_ACCESS)
+#define IOCTL_READ_WORKITEMS CTL_CODE(0x8000, 0x801, METHOD_OUT_DIRECT, FILE_ANY_ACCESS)
+#define IOCTL_WRITE_ALERT CTL_CODE(0x8000, 0x802, METHOD_IN_DIRECT, FILE_ANY_ACCESS)
 
 
 template<typename T>
@@ -48,8 +52,8 @@ struct ScanProcessHeaderJob : TaskHeader {
 };
 
 struct ScanFileHeaderJob : TaskHeader {
-	int FilePathLength;
-	wchar_t* FilePath;
+	size_t FilePathLength;
+	ULONG FilePathOffset;
 };
 
 struct SystemScanHeaderJob : TaskHeader {
@@ -88,26 +92,26 @@ public:
 
 // PUBLIC VARIABLES
 public:
-	std::string YaraConfFilePath;
-
+	static std::string YaraConfFilePath;
+	static Yara::Scanner* Scanner;
 
 
 // PRIVATE FUNCTIONS
 private:
-	void StartWorkerThread();
-	void StartApiMonitorThread();
-	void StartNotificationThread();
-	void StartDriverReadThread();
+	static void StartWorkerThread();
+	static void StartApiMonitorThread();
+	static void StartNotificationThread();
+	static void StartDriverReadThread();
 
 
 // PRIVATE VARIABLES
 private:
-	HANDLE hFile;							// THIS IS THE HANDLE TO THE DRIVER'S SYMBOLIC LINK
-	HANDLE workerThread;					// THIS IS WHERE WE PERFORM SCANNING
-	HANDLE apiMonitorThread;				// THIS IS WHERE WE DETECT MALICIOUS API SEQUENCES
-	HANDLE notificationThread;				// THIS IS WHERE WE WRITE DETECTIONS BACK TO DRIVER
-	HANDLE driverReadThread;				// THIS IS WHERE WE WILL CONTINUALLY GET WORK ITEMS
-	PSLIST_HEADER workItemsHead;
-	unsigned int workItemsCount;
+	static HANDLE hFile;							// THIS IS THE HANDLE TO THE DRIVER'S SYMBOLIC LINK
+	static HANDLE hWorkerThread;					// THIS IS WHERE WE PERFORM SCANNING
+	static HANDLE hApiMonitorThread;				// THIS IS WHERE WE DETECT MALICIOUS API SEQUENCES
+	static HANDLE hNotificationThread;				// THIS IS WHERE WE WRITE DETECTIONS BACK TO DRIVER
+	static HANDLE hDriverReadThread;				// THIS IS WHERE WE WILL CONTINUALLY GET WORK ITEMS
+	static PSLIST_HEADER workItemsHead;
+	static int workItemsCount;
 };
 

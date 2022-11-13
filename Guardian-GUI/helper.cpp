@@ -21,6 +21,14 @@ BOOL DirExists(LPCSTR szPath)
 }
 
 
+BOOL FileExists(LPCTSTR szPath)
+{
+	DWORD dwAttrib = GetFileAttributes(szPath);
+
+	return (dwAttrib != INVALID_FILE_ATTRIBUTES &&
+		!(dwAttrib & FILE_ATTRIBUTE_DIRECTORY));
+}
+
 
 
 std::vector<std::wstring> listUsers() {

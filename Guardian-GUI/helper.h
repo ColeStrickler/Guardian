@@ -10,4 +10,5 @@
 
 std::string DisplayTime(const LARGE_INTEGER& time);
 BOOL DirExists(LPCSTR szPath);
+BOOL FileExists(LPCTSTR szPath);
 std::vector<std::wstring> listUsers();
