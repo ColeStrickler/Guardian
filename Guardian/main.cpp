@@ -52,15 +52,15 @@ NTSTATUS CompleteIrp(PIRP Irp, NTSTATUS status = STATUS_SUCCESS, ULONG_PTR info 
 
 void charToUnicodeString(char* text, UNICODE_STRING& outstring)
 {
-	KdPrint(("In string: %s", text));
+	KdPrint(("In string: %s\n", text));
 	size_t size = (strlen(text) + 1) * sizeof(wchar_t);
-	KdPrint(("Size: %d", size));
+	KdPrint(("Size: %d\n", size));
 	wchar_t* wText = (wchar_t*)ExAllocatePoolWithTag(NonPagedPool, size, 'grdn');
 	memset(wText, 0, size);
 	mbstowcs(wText, text, (strlen(text)));
-	KdPrint(("wText: %ws", wText));
+	KdPrint(("wText: %ws\n", wText));
 	RtlInitUnicodeString(&outstring, wText);
-	KdPrint(("Generated outstring %wZ", outstring));
+	KdPrint(("Generated outstring %wZ\n", outstring));
 	ExFreePool(wText);
 }
 
@@ -111,7 +111,7 @@ NTSTATUS InitBlockedExecutionPaths() {
 		NULL, 0);
 
 	if (!NT_SUCCESS(status)) {
-		KdPrint(("ZwCreateFileFailed"));
+		KdPrint(("ZwCreateFileFailed\n"));
 		return status;
 	}
 
@@ -123,7 +123,7 @@ NTSTATUS InitBlockedExecutionPaths() {
 		}
 		return STATUS_FAILED_DRIVER_ENTRY;
 	}
-	KdPrint(("Read file: blockConfigFile size : %d", (int)fileInfo.EndOfFile.QuadPart));
+	KdPrint(("Read file: blockConfigFile size : %d\n", (int)fileInfo.EndOfFile.QuadPart));
 
 	char* buf = (char*)ExAllocatePoolWithTag(NonPagedPool, fileInfo.EndOfFile.QuadPart, DRIVER_TAG);
 	
@@ -154,11 +154,11 @@ NTSTATUS InitBlockedExecutionPaths() {
 			endFileIndex = i;
 			memcpy(filePathName, buf + startFileIndex, endFileIndex - startFileIndex);
 			startFileIndex = i + 3;
-			KdPrint(("Found path: %s", filePathName));
+			KdPrint(("Found path: %s\n", filePathName));
 			BlockedPathNode* NewEntry = (BlockedPathNode*)ExAllocatePoolWithTag(NonPagedPool, sizeof(BlockedPathNode), DRIVER_TAG);
 			charToUnicodeString(filePathName, NewEntry->Path);
 			PushItem(&NewEntry->Entry, &g_Struct.BlockedPathsHead, g_Struct.BlockedPathsMutex, g_Struct.BlockedPathsCount);
-			KdPrint(("Added path %wZ to block list!", &NewEntry->Path));
+			KdPrint(("Added path %wZ to block list!\n", &NewEntry->Path));
 			memset(filePathName, 0, 260); // set back to 0
 			i += 2;
 		}
@@ -194,7 +194,7 @@ DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING) {
 	g_Struct.BlockedPathsMutex.Init();
 	g_Struct.ServiceWorkItemsMutex.Init();
 	RtlGetVersion(&g_Struct.versionInfo);
-	KdPrint(("Version %d.%d.%d found!", g_Struct.versionInfo.dwMajorVersion, g_Struct.versionInfo.dwMinorVersion, g_Struct.versionInfo.dwBuildNumber));
+	KdPrint(("Version %d.%d.%d found!\n", g_Struct.versionInfo.dwMajorVersion, g_Struct.versionInfo.dwMinorVersion, g_Struct.versionInfo.dwBuildNumber));
 	
 	do {
 		status = IoCreateDevice(DriverObject, 0, &devName, FILE_DEVICE_UNKNOWN, 0, TRUE, &DeviceObject);
@@ -215,10 +215,10 @@ DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING) {
 
 		status = InitBlockedExecutionPaths();
 		if (!NT_SUCCESS(status)) {
-			KdPrint((DRIVER_PREFIX "failed to get blocked execution paths!"));
+			KdPrint((DRIVER_PREFIX "failed to get blocked execution paths!\n"));
 			break;
 		}
-		KdPrint((DRIVER_PREFIX "successfully fetched blocked execution paths!"));
+		KdPrint((DRIVER_PREFIX "successfully fetched blocked execution paths!\n"));
 
 
 		status = PsSetCreateProcessNotifyRoutineEx(OnProcessNotify, FALSE);
@@ -331,21 +331,49 @@ void Unload(PDRIVER_OBJECT DriverObject) {
 
 
 		switch (type) {
-		case (short)ItemType::RemoteThreadCreate: 
-		{
-			ExFreePool(CONTAINING_RECORD(entry, Alert<RemoteThreadAlert>, Entry));
-			break;
-		}
-		case (short)ItemType::BlockedExecutionPath:
-		{
-			ExFreePool(CONTAINING_RECORD(entry, Alert<BlockedPathAlert>, Entry));
-			break;
-		}
-
+			case (short)ItemType::RemoteThreadCreate: 
+			{
+				ExFreePool(CONTAINING_RECORD(entry, Alert<RemoteThreadAlert>, Entry));
+				break;
+			}
+			case (short)ItemType::BlockedExecutionPath:
+			{
+				ExFreePool(CONTAINING_RECORD(entry, Alert<BlockedPathAlert>, Entry));
+				break;
+			}
 		}	
 	}
 
+	while (!IsListEmpty(&g_Struct.BlockedPathsHead)) {
+		auto entry = RemoveHeadList(&g_Struct.BlockedPathsHead);
+		ExFreePool(CONTAINING_RECORD(entry, BlockedPathNode, Entry));
+	}
 
+	while (!IsListEmpty(&g_Struct.ServiceWorkItemsHead)) {
+		auto entry = RemoveHeadList(&g_Struct.ServiceWorkItemsHead);
+		short type = *(short*)((UINT64)entry + sizeof(LIST_ENTRY));
+		
+
+		switch (type) {
+			case (short)TaskType::ScanFile:
+			{
+				ExFreePool(CONTAINING_RECORD(entry, WorkItem<ScanFileHeaderJob>, Entry));
+				break;
+			}
+
+			case (short)TaskType::ScanProcess:
+			{
+				ExFreePool(CONTAINING_RECORD(entry, WorkItem<ScanProcessHeaderJob>, Entry));
+				break;
+			}
+
+			case (short)TaskType::SystemScan:
+			{
+				ExFreePool(CONTAINING_RECORD(entry, WorkItem<SystemScanHeaderJob>, Entry));
+				break;
+			}
+		}
+	}
 
 }
 
@@ -582,13 +610,16 @@ NTSTATUS IoControl(PDEVICE_OBJECT, PIRP Irp) {
 	{
 		// DIRECT IO BECAUSE THIS COULD BE A LARGE BUFFER
 		NT_ASSERT(Irp->MdlAddress);
-		auto buffer = (UCHAR*)MmGetSystemAddressForMdlSafe(Irp->MdlAddress, NormalPagePriority);
+		KdPrint(("Irp->MdlAddress: 0x%8x\n", (ULONGLONG)Irp->MdlAddress));
 
+		auto buffer = (UCHAR*)MmGetSystemAddressForMdlSafe(Irp->MdlAddress, NormalPagePriority);
 		if (!buffer) {
+			KdPrint(("Could not get MdlAddress!\n"));
 			status = STATUS_INSUFFICIENT_RESOURCES;
 			break;
 		}
 		auto type = ((TaskHeader*)(buffer))->Type;
+		KdPrint((DRIVER_PREFIX "IOCTL_WRITE_ITEM-->TYPE: %d\n", type));
 
 		switch (type) {
 			case TaskType::ScanFile:
@@ -656,6 +687,7 @@ NTSTATUS IoControl(PDEVICE_OBJECT, PIRP Irp) {
 				status = STATUS_INVALID_DEVICE_REQUEST;
 				break;
 		}
+		break;
 	}
 
 

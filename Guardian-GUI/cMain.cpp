@@ -328,21 +328,26 @@ void cMain::YaraScanFile(wxCommandEvent& evt) {
         return;
     }
 
-    ScanFileHeaderJob* NewScanFileJob = (ScanFileHeaderJob*)buffer;
-    NewScanFileJob->Type = TaskType::ScanFile;
-    NewScanFileJob->FilePathOffset = sizeof(ScanFileHeaderJob);
-    NewScanFileJob->FilePathLength = filePath.size();
-    NewScanFileJob->Size = sizeof(ScanFileHeaderJob) + filePath.size();
+    ScanFileHeaderJob NewScanFileJob;
+    NewScanFileJob.Type = TaskType::ScanFile;
+    NewScanFileJob.FilePathOffset = sizeof(ScanFileHeaderJob);
+    NewScanFileJob.FilePathLength = filePath.size();
+    NewScanFileJob.Size = sizeof(ScanFileHeaderJob) + filePath.size();
+
+    memcpy(buffer, &NewScanFileJob, sizeof(ScanFileHeaderJob));
     memcpy(buffer + sizeof(ScanFileHeaderJob), filePath.data(), filePath.size());
 
     DWORD retBytes;
+    // https://stackoverflow.com/questions/26329328/pass-deviceiocontrol-input-buffer-with-directio
+    // THERE ARE TWO INPUT BUFFERS WHEN DIRECT IO IS SPECIFIED, THE FIRST IS AVAILABLE TO THE DRIVER THROUGH THE SYSTEM BUFFER,
+    // THE SECOND IS AVAILABLE THROUGH DIRECT IO
     check = DeviceIoControl(
         hFile,
         IOCTL_WRITE_WORKITEM,
+        0,
+        0,
         &NewScanFileJob,
         allocSize,
-        nullptr,
-        0,
         &retBytes,
         0
     );

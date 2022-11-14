@@ -2,6 +2,7 @@
 #include <tchar.h>
 #include <string>
 #include <cstdio>
+#include "Service.h"
 
 
 SERVICE_STATUS        g_ServiceStatus = { 0 };
@@ -12,7 +13,7 @@ VOID WINAPI ServiceMain(DWORD argc, LPTSTR* argv);
 VOID WINAPI ServiceCtrlHandler(DWORD);
 DWORD WINAPI ServiceWorkerThread(LPVOID lpParam);
 
-#define SERVICE_NAME  _T("My Sample Service")
+#define SERVICE_NAME  _T("GuardianService")
 
 
 using namespace std;
@@ -183,6 +184,7 @@ DWORD WINAPI ServiceWorkerThread(LPVOID lpParam)
    // OutputDebugString(_T("My Sample Service: ServiceWorkerThread: Entry"));
     int i = 0;
     //  Periodically check if the service has been requested to stop
+    Service Service();
     while (WaitForSingleObject(g_ServiceStopEvent, 0) != WAIT_OBJECT_0)                 
     {
         
