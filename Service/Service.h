@@ -4,16 +4,9 @@
 #include <string>
 #include "RAII.h"
 #include "YaraAgent.h"
-
+#include <iostream>
 // TEMP
 #include <iostream>
-
-
-#ifdef DEBUG
-# define DEBUG_PRINT(x) printf(x)
-#else
-# define DEBUG_PRINT(x) do {} while (0)
-#endif
 
 
 #define IOCTL_READ_WORKITEMS CTL_CODE(0x8000, 0x801, METHOD_OUT_DIRECT, FILE_ANY_ACCESS)
@@ -68,7 +61,6 @@ struct ScanProcessHeaderFull : ScanProcessHeaderJob {
 };
 
 struct ScanFileHeaderFull : ScanFileHeaderJob {
-	std::wstring FilePathServiceUse;
 	std::vector<std::string> YaraDetections;
 };
 
@@ -97,9 +89,9 @@ public:
 	static inline HANDLE hFile;							// THIS IS THE HANDLE TO THE DRIVER'S SYMBOLIC LINK
 	static inline HANDLE hWorkerThread;					// THIS IS WHERE WE PERFORM SCANNING
 	static inline HANDLE hApiMonitorThread;				// THIS IS WHERE WE DETECT MALICIOUS API SEQUENCES
-	static inline HANDLE hNotificationThread;				// THIS IS WHERE WE WRITE DETECTIONS BACK TO DRIVER
+	static inline HANDLE hNotificationThread;			// THIS IS WHERE WE WRITE DETECTIONS BACK TO DRIVER
 	static inline HANDLE hDriverReadThread;				// THIS IS WHERE WE WILL CONTINUALLY GET WORK ITEMS
-	static inline PSLIST_HEADER workItemsHead;
+	static inline SLIST_HEADER workItemsHead;
 	static inline int workItemsCount;
 
 

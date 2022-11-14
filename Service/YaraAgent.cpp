@@ -7,7 +7,7 @@ Yara::Scanner::Scanner(std::string YaraConfFilePath)
 	int init = yr_initialize();
 
 	if (init != ERROR_SUCCESS) {
-		DEBUG_PRINT("Yara ProcessScanner initialize failed: %d\n", GetLastError());
+		printf("Yara ProcessScanner initialize failed: %d\n", GetLastError());
 		return;
 	}
 
@@ -17,6 +17,7 @@ Yara::Scanner::Scanner(std::string YaraConfFilePath)
 	
 	if (bSetup) {
 		for (const auto& file : std::filesystem::recursive_directory_iterator(YaraConfFilePath)) {
+			std::cout << file << std::endl;
 			if (".yar" != file.path().extension()) {
 				continue;
 			}
@@ -26,7 +27,7 @@ Yara::Scanner::Scanner(std::string YaraConfFilePath)
 		}
 		int result = yr_compiler_get_rules(compiler, &rules);
 		if (result != ERROR_SUCCESS) {
-			DEBUG_PRINT("Yara ProcessScanner initialize failed during rule initialization: %d\n", GetLastError());
+			printf("Yara ProcessScanner initialize failed during rule initialization: %d\n", GetLastError());
 			bSetup = FALSE;
 		}
 
@@ -38,7 +39,7 @@ Yara::Scanner::~Scanner()
 {
 	int end = yr_finalize();
 	if (end != ERROR_SUCCESS) {
-		DEBUG_PRINT("Yara ProcessScanner finalize failed: %d\n", GetLastError());
+		printf("Yara ProcessScanner finalize failed: %d\n", GetLastError());
 		return;
 	}
 }
@@ -63,19 +64,19 @@ BOOL Yara::Scanner::AddRuleFromFile(std::string file_name)
 	FILE* rule_file = NULL;
 	int result = fopen_s(&rule_file, file_name.c_str(), "r");
 	if (result != ERROR_SUCCESS) {
-		DEBUG_PRINT("Failed to add rule from %s --> ERROR: \n", file_name.c_str(), GetLastError());
+		printf("Failed to add rule from %s --> ERROR: \n", file_name.c_str(), GetLastError());
 		return FALSE;
 	}
 
 	result = yr_compiler_add_file(compiler, rule_file, NULL, file_name.c_str());
 	if (result != ERROR_SUCCESS) {
-		DEBUG_PRINT("Failed to compile rule from %s --> ERROR: \n", file_name.c_str(), GetLastError());
+		printf("Failed to compile rule from %s --> ERROR: \n", file_name.c_str(), GetLastError());
 		return FALSE;
 	}
 
 	result = yr_compiler_get_rules(compiler, &rules);
 	if (result != ERROR_SUCCESS) {
-		DEBUG_PRINT("Failed to compile rule from %s --> ERROR: \n", file_name.c_str(), GetLastError());
+		printf("Failed to compile rule from %s --> ERROR: \n", file_name.c_str(), GetLastError());
 		return FALSE;
 	}
 	return TRUE;
@@ -101,7 +102,7 @@ std::vector<RegionInfo> Yara::Scanner::GetProcessRegions(HANDLE hProcess)
 	}
 
 	if (regions.size() == 0) {
-		DEBUG_PRINT("Error while trying to querry virtual memory --> %d.\n", GetLastError());
+		printf("Error while trying to querry virtual memory --> %d.\n", GetLastError());
 	}
 
 	return regions;
@@ -120,7 +121,7 @@ std::vector<std::byte> ReadFileToBuffer(HANDLE hFile)
 	BOOL bRead = ReadFile(hFile, buffer.data(), fileSize, &numRead, 0);
 	if (bRead == FALSE)
 	{
-		DEBUG_PRINT("Yara::Scanner::ReadFileToBuffer()-->ReadFile() failure! Error: %d", GetLastError());
+		printf("Yara::Scanner::ReadFileToBuffer()-->ReadFile() failure! Error: %d", GetLastError());
 	}
 
 	return buffer;
@@ -137,7 +138,7 @@ std::vector<std::byte> ReadRegionToBuffer(RegionInfo regionInfo, HANDLE hProcess
 	BOOL bRead = ReadProcessMemory(hProcess, (LPVOID)regionInfo.pBase, buffer.data(),regionInfo.dwRegion, NULL);
 	if (bRead == FALSE)
 	{
-		DEBUG_PRINT("Yara::Scanner::ReadRegionToBuffer()-->ReadProcessMemory() failure! Error: %d", GetLastError());
+		printf("Yara::Scanner::ReadRegionToBuffer()-->ReadProcessMemory() failure! Error: %d", GetLastError());
 	}
 
 	return buffer;
@@ -177,7 +178,7 @@ std::vector<YaraInfo> Yara::Scanner::ScanProcess(DWORD procId)
 	RAII::Handle hProc = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, procId);
 	std::vector<YaraInfo> retInfo;
 	if (!hProc.Get()) {
-		DEBUG_PRINT("Yara::Scanner::ScanProcess() unable to obtain handle to process --> %d\n", GetLastError());
+		printf("Yara::Scanner::ScanProcess() unable to obtain handle to process --> %d\n", GetLastError());
 		return retInfo;
 	}
 	std::vector<RegionInfo> ProcessMemoryRegions = GetProcessRegions(hProc.Get());
@@ -218,10 +219,12 @@ YaraInfo Yara::Scanner::ScanFile(std::string FilePath)
 
 	RAII::Handle hFile = CreateFileA(FilePath.c_str(), GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, NULL, NULL);
 	if (hFile.Get() == NULL) {
+		printf("Could not obtain handle to file.\n");
 		return retInfo;
 	}
 	std::vector<std::byte> FileMap = ReadFileToBuffer(hFile.Get());
 	if (FileMap.empty()) {
+		printf("Could not read file to buffer.\n");
 		return retInfo;
 	}
 
@@ -238,7 +241,7 @@ YaraInfo Yara::Scanner::ScanFile(std::string FilePath)
 		yaraInfo.FilePath = '0';
 	}
 
-	return retInfo;
+	return yaraInfo;
 
 }
 

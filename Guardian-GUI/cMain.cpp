@@ -320,7 +320,7 @@ void cMain::YaraScanFile(wxCommandEvent& evt) {
         return;
     }
 
-    DWORD allocSize = sizeof(ScanFileHeaderJob) + filePath.size();
+    DWORD allocSize = sizeof(ScanFileHeaderJob) + filePath.size() * 2 + 1;
     auto buffer = RAII::HeapBuffer(allocSize).Get();
     if (buffer == nullptr) {
         MessageBoxA(NULL, "Unable to allocate heap for IO.", "Error", MB_ICONERROR | MB_DEFBUTTON1);
@@ -331,11 +331,11 @@ void cMain::YaraScanFile(wxCommandEvent& evt) {
     ScanFileHeaderJob NewScanFileJob;
     NewScanFileJob.Type = TaskType::ScanFile;
     NewScanFileJob.FilePathOffset = sizeof(ScanFileHeaderJob);
-    NewScanFileJob.FilePathLength = filePath.size();
-    NewScanFileJob.Size = sizeof(ScanFileHeaderJob) + filePath.size();
+    NewScanFileJob.FilePathLength = filePath.size() * 2;
+    NewScanFileJob.Size = sizeof(ScanFileHeaderJob) + filePath.size() * 2;
 
     memcpy(buffer, &NewScanFileJob, sizeof(ScanFileHeaderJob));
-    memcpy(buffer + sizeof(ScanFileHeaderJob), filePath.data(), filePath.size());
+    memcpy(buffer + sizeof(ScanFileHeaderJob), filePath.data(), filePath.size() * 2);
 
     DWORD retBytes;
     // https://stackoverflow.com/questions/26329328/pass-deviceiocontrol-input-buffer-with-directio
@@ -346,15 +346,22 @@ void cMain::YaraScanFile(wxCommandEvent& evt) {
         IOCTL_WRITE_WORKITEM,
         0,
         0,
-        &NewScanFileJob,
+        buffer,
         allocSize,
         &retBytes,
         0
     );
 
+    YaraScanFileTxtBox->Clear();
+    //MessageBoxW(NULL, (wchar_t*)(buffer + sizeof(ScanFileHeaderJob)), L"Error", MB_ICONERROR | MB_DEFBUTTON1);
+    std::wstring check2((wchar_t*)(buffer + sizeof(ScanFileHeaderJob)), filePath.size() * 2);
+    MessageBoxW(NULL, check2.c_str(), L"Error2", MB_ICONERROR | MB_DEFBUTTON1);
+    YaraScanFileTxtBox->AppendText(wxString(((wchar_t*)(buffer + sizeof(ScanFileHeaderJob)))));
+
+
     if (check) {
-        YaraScanFileTxtBox->Clear();
-        YaraScanFileTxtBox->AppendText(wxString("Started scan successfully."));
+       // YaraScanFileTxtBox->Clear();
+       // YaraScanFileTxtBox->AppendText(wxString("Started scan successfully."));
     }
     else {
         YaraScanFileTxtBox->Clear();

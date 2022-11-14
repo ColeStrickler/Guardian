@@ -1,22 +1,79 @@
 #include <filesystem>
 #include <iostream>
 #include <string>
-#include <Windows.h>
 #include <chrono>
+#include "test.h"
 
+RAII::Handle::Handle(HANDLE hHandle)
+{
+    _hHandle = hHandle;
+}
+
+void RAII::Handle::Update(HANDLE hHandle)
+{
+    _hHandle = hHandle;
+}
+HANDLE RAII::Handle::Get()
+{
+    return _hHandle;
+}
+
+BOOL RAII::Handle::Empty()
+{
+    if (_hHandle == NULL)
+    {
+        return TRUE;
+    }
+    else
+    {
+        return FALSE;
+    }
+}
+
+BOOL RAII::Handle::Close()
+{
+    if (CloseHandle(_hHandle))
+    {
+        return TRUE;
+    }
+    else
+    {
+        return FALSE;
+    }
+}
+RAII::Handle::~Handle()
+{
+    if (_hHandle) CloseHandle(_hHandle);
+}
+
+
+
+RAII::HeapBuffer::HeapBuffer(size_t size) {
+    buf = (BYTE*)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, size);
+}
+
+BYTE* RAII::HeapBuffer::Get() {
+    return buf;
+}
+RAII::HeapBuffer::~HeapBuffer() {
+    if (buf != nullptr) {
+        HeapFree(GetProcessHeap(), NULL, buf);
+    }
+}
+
+std::string WstringToString(std::wstring wstr) {
+	DWORD len = wcslen(wstr.data()) + 1;
+	RAII::HeapBuffer strbuffer(len);
+	sprintf_s((char*)strbuffer.Get(), len, "%ws", wstr.data());
+	std::string ret = std::string((char*)strbuffer.Get());
+	return ret;
+}
 
 int main() {
 
-	std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
-	try {
-		for (const auto& dirEntry : std::filesystem::recursive_directory_iterator(std::string("C:\\"), std::filesystem::directory_options::skip_permission_denied)) {
-			//std::cout << dirEntry << std::endl;
-		}
-	}	
-	catch (std::filesystem::filesystem_error e) {
-		printf("Error: %s\n", e.what());
-	}
-	std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
-	std::cout << "Time to traverse file system = " << std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count() << "[µs]" << std::endl;
+    std::wstring swag(L"C:\\Users\\IEUser\\Desktop\\dbgview64.exe");
+
+    std::string out = WstringToString(swag);
+    std::cout << "string: " << out << std::endl;
 }
 

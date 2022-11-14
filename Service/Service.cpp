@@ -3,27 +3,37 @@
 
 
 Service::Service() {
-	InitializeSListHead(workItemsHead);
+	printf("HERE!\n");
+	hFile = CreateFile(L"\\\\.\\guardian", GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, 0, nullptr);
+	if (hFile == INVALID_HANDLE_VALUE) {
+		printf("INVALID HANDLE VALUE!\n");
+	//	return;
+	}
+
+
+	InitializeSListHead(&workItemsHead);
+	printf("WorkItemsHead initialized\n");
 	YaraConfFilePath = std::string("C:\\Program Files\\Guardian\\conf\\Yara");
 	Scanner = new Yara::Scanner(YaraConfFilePath);
+	printf("Yara scanner initialized!\n");
 	if (Scanner == nullptr) {
-		DEBUG_PRINT("Could not initialize YaraScanner. ERROR: %d\n", GetLastError());
+		printf("Could not initialize YaraScanner. ERROR: %d\n", GetLastError());
 		return;
 	}
 	if (!Scanner->bSetup) {
-		DEBUG_PRINT("Could not initialzie YaraScanner. ERROR: %d\n", GetLastError());
+		printf("Could not initialzie YaraScanner. ERROR: %d\n", GetLastError());
 		return;
 	}
 
 	hDriverReadThread = CreateThread(0, 0, reinterpret_cast<LPTHREAD_START_ROUTINE>(StartDriverReadThread), this, 0, 0);
 	if (hDriverReadThread == NULL) {
-		DEBUG_PRINT("Could not start StartDriverReadThread(). ERROR: %d\n", GetLastError());
+		printf("Could not start StartDriverReadThread(). ERROR: %d\n", GetLastError());
 		return;
 	}
 
 	hWorkerThread = CreateThread(0, 0, reinterpret_cast<LPTHREAD_START_ROUTINE>(StartWorkerThread), this, 0, 0);
 	if (hDriverReadThread == NULL) {
-		DEBUG_PRINT("Could not start StartWorkerThread(). ERROR: %d\n", GetLastError());
+		printf("Could not start StartWorkerThread(). ERROR: %d\n", GetLastError());
 		return;
 	}
 
@@ -34,30 +44,29 @@ Service::~Service() {
 }
 
 void Service::StartWorkerThread() {
-	AllocConsole();
-	FILE* f;
-	freopen_s(&f, "CONOUT$", "w", stdout);
-
-
 
 	while (true) {
 		if (workItemsCount == 0) {
 			Sleep(50);
 			continue;
 		}
+		printf("Found new work item in Worker Thread!\n");
 
-		PSLIST_ENTRY currEntry = InterlockedPopEntrySList(workItemsHead);
+		PSLIST_ENTRY currEntry = InterlockedPopEntrySList(&workItemsHead);
 		workItemsCount--;
 		TaskType EntryType = *(TaskType*)((uintptr_t)currEntry + sizeof(SLIST_ENTRY));
 		
-
+		printf("New work item type: %d\n", EntryType);
 		switch (EntryType) {
 
 			case TaskType::ScanFile:
 			{
 				
 				auto ScanFileJob = CONTAINING_RECORD(currEntry, WorkItem<ScanFileHeaderFull>, Entry);
-				std::string FilePath = WstringToString(ScanFileJob->Data.FilePathServiceUse);
+				std::wstring wFilePath((wchar_t*)((BYTE*)ScanFileJob + ScanFileJob->Data.FilePathOffset), ScanFileJob->Data.Size);
+				std::wcout << "wFilePath: " << wFilePath << std::endl;
+				std::string FilePath = WstringToString(wFilePath);
+				std::cout << "After transformation: " << FilePath << std::endl;
 				YaraInfo yaraInfo = Scanner->ScanFile(FilePath);
 				std::cout << "\n\n" << std::endl;
 				std::cout << "Infected File Path: " << yaraInfo.FilePath << std::endl;
@@ -65,6 +74,7 @@ void Service::StartWorkerThread() {
 					std::cout << "Matched Rule: " << rule << std::endl;
 				}
 				std::cout << "\n\n" << std::endl;
+				break;
 			}
 			case TaskType::ScanProcess:
 			{
@@ -115,7 +125,9 @@ void Service::StartNotificationThread() {
 
 void Service::StartDriverReadThread() {
 	while (true) {
-		BYTE* buffer = (BYTE*)RAII::HeapBuffer(1 << 16).Get();
+		//BYTE* buffer = (BYTE*)RAII::HeapBuffer(DWORD(1 << 16)).Get();
+		BYTE arr[1 << 16];
+		BYTE* buffer = arr;
 		if (buffer == nullptr) {
 			continue;
 		}
@@ -123,18 +135,20 @@ void Service::StartDriverReadThread() {
 		BOOL success = DeviceIoControl(
 			hFile,
 			IOCTL_READ_WORKITEMS,
-			nullptr,
 			0,
-			&buffer,
-			sizeof(buffer),
+			0,
+			buffer,
+			DWORD(1 << 16),
 			&retBytes,
 			nullptr         // lpOverlapped
 		);
 		if (!success) {
-			DEBUG_PRINT("DeviceIO failed in DriverReadThread");
+			printf("DeviceIO failed in DriverReadThread: %d\n", GetLastError());
 			continue;
 		}
-
+		if (retBytes > 0) {
+			printf("GOT TASK!\n");
+		}
 		while (retBytes > 0) {
 			auto header = (TaskHeader*)buffer;
 
@@ -142,16 +156,18 @@ void Service::StartDriverReadThread() {
 				case TaskType::ScanFile:
 				{
 					auto ScanFileTask = (ScanFileHeaderJob*)buffer;
-					auto NewScanFileTask = new WorkItem<ScanFileHeaderFull>();
+					DWORD allocSize = sizeof(WorkItem<ScanFileHeaderFull>) + ScanFileTask->FilePathLength;
+					auto NewScanFileTask = (WorkItem<ScanFileHeaderFull>*)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, allocSize);
 
 
-					NewScanFileTask->Data.FilePathServiceUse = std::wstring((wchar_t*)(buffer + ScanFileTask->FilePathOffset), ScanFileTask->FilePathLength);
-					NewScanFileTask->Data.FilePathLength = NewScanFileTask->Data.FilePathServiceUse.size();
-					NewScanFileTask->Data.Size = 0;			// We will ignore this field in User mode
+					NewScanFileTask->Data.FilePathOffset = sizeof(WorkItem<ScanFileHeaderFull>);
+					memcpy((BYTE*)NewScanFileTask + sizeof(WorkItem<ScanFileHeaderFull>), buffer + ScanFileTask->FilePathOffset, ScanFileTask->FilePathLength);
+					NewScanFileTask->Data.FilePathLength = ScanFileTask->FilePathLength;
+					NewScanFileTask->Data.Size = allocSize;			// We will ignore this field in User mode
 					NewScanFileTask->Data.Type = TaskType::ScanFile;
 
 
-					InterlockedPushEntrySList(workItemsHead, &NewScanFileTask->Entry);
+					InterlockedPushEntrySList(&workItemsHead, &NewScanFileTask->Entry);
 					workItemsCount++;
 					break;
 				}
@@ -166,7 +182,7 @@ void Service::StartDriverReadThread() {
 					NewScanProcessTask->Data.Type = TaskType::ScanProcess;
 
 
-					InterlockedPushEntrySList(workItemsHead, &NewScanProcessTask->Entry);
+					InterlockedPushEntrySList(&workItemsHead, &NewScanProcessTask->Entry);
 					workItemsCount++;
 					break;
 				}
@@ -181,7 +197,7 @@ void Service::StartDriverReadThread() {
 					NewSystemScanTask->Data.Size = 0;		// We will ignore this field in User mode
 
 
-					InterlockedPushEntrySList(workItemsHead, &NewSystemScanTask->Entry);
+					InterlockedPushEntrySList(&workItemsHead, &NewSystemScanTask->Entry);
 					workItemsCount++;
 					break;
 				}
@@ -195,8 +211,7 @@ void Service::StartDriverReadThread() {
 			retBytes -= header->Size;
 
 		}
-
-		
+		Sleep(1500);
 	}
 	
 }

@@ -197,7 +197,7 @@ DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING) {
 	KdPrint(("Version %d.%d.%d found!\n", g_Struct.versionInfo.dwMajorVersion, g_Struct.versionInfo.dwMinorVersion, g_Struct.versionInfo.dwBuildNumber));
 	
 	do {
-		status = IoCreateDevice(DriverObject, 0, &devName, FILE_DEVICE_UNKNOWN, 0, TRUE, &DeviceObject);
+		status = IoCreateDevice(DriverObject, 0, &devName, FILE_DEVICE_UNKNOWN, 0, FALSE, &DeviceObject);
 		if (!NT_SUCCESS(status)) {
 			KdPrint((DRIVER_PREFIX "failed to create device (0x%08X)\n", status));
 			break;
@@ -556,7 +556,7 @@ NTSTATUS IoControl(PDEVICE_OBJECT, PIRP Irp) {
 	auto stack = IoGetCurrentIrpStackLocation(Irp);
 	auto count = 0;
 
-	KdPrint(("Control Code: 0x%8X", stack->Parameters.DeviceIoControl.IoControlCode));
+	KdPrint(("Control Code: 0x%8X\n", stack->Parameters.DeviceIoControl.IoControlCode));
 	
 	switch (stack->Parameters.DeviceIoControl.IoControlCode)
 	{
@@ -638,9 +638,11 @@ NTSTATUS IoControl(PDEVICE_OBJECT, PIRP Irp) {
 				NewScanFileJob->Data.Size = allocSize;
 				NewScanFileJob->Data.Type = TaskType::ScanFile;
 				NewScanFileJob->Data.FilePathLength = filePathLen;
-				NewScanFileJob->Data.FilePathOffset = sizeof(WorkItem<ScanFileHeaderJob>);
+				NewScanFileJob->Data.FilePathOffset = sizeof(ScanFileHeaderJob);
+				KdPrint(("Reading file path: %ws\n", (wchar_t*)((UCHAR*)buffer + ReadInFileJob->FilePathOffset)));
 				memcpy((UCHAR*)NewScanFileJob + sizeof(WorkItem<ScanFileHeaderJob>), buffer + ReadInFileJob->FilePathOffset, filePathLen);
-
+				
+				KdPrint(("Allocated new WorkItem<ScanFileHeaderJob>\n"));
 				PushItem(&NewScanFileJob->Entry, &g_Struct.ServiceWorkItemsHead, g_Struct.ServiceWorkItemsMutex, g_Struct.ServiceWorkItemsCount);
 				break;
 			}
@@ -660,6 +662,7 @@ NTSTATUS IoControl(PDEVICE_OBJECT, PIRP Irp) {
 				NewScanProcessJob->Data.ProcessId = ReadInProcessJob->ProcessId;
 				NewScanProcessJob->Data.Type = TaskType::ScanProcess;
 
+				KdPrint(("Allocated new WorkItem<ScanProcessHeaderJob>\n"));
 				PushItem(&NewScanProcessJob->Entry, &g_Struct.ServiceWorkItemsHead, g_Struct.ServiceWorkItemsMutex, g_Struct.ServiceWorkItemsCount);
 				break;
 			}
@@ -679,6 +682,7 @@ NTSTATUS IoControl(PDEVICE_OBJECT, PIRP Irp) {
 				NewSystemScanJob->Data.Size = sizeof(WorkItem<SystemScanHeaderJob>);
 				NewSystemScanJob->Data.Type = TaskType::SystemScan;
 				
+				KdPrint(("Allocated new WorkItem<SystemScanHeaderJob>\n"));
 				PushItem(&NewSystemScanJob->Entry, &g_Struct.ServiceWorkItemsHead, g_Struct.ServiceWorkItemsMutex, g_Struct.ServiceWorkItemsCount);
 				break;
 			}
@@ -694,16 +698,18 @@ NTSTATUS IoControl(PDEVICE_OBJECT, PIRP Irp) {
 	// FROM HERE, THE SERVICE COMPONENT WILL READ WORK ITEMS FROM THE DRIVER
 	case IOCTL_READ_WORKITEMS:
 	{
+		KdPrint((DRIVER_PREFIX "[IOCTL_READ_WORKITEMS]\n"));
 		// DIRECT IO BECAUSE THIS COULD BE A LARGE BUFFER
 		NT_ASSERT(Irp->MdlAddress);
 		auto len = stack->Parameters.DeviceIoControl.OutputBufferLength;
 		auto buffer = (UCHAR*)MmGetSystemAddressForMdlSafe(Irp->MdlAddress, NormalPagePriority);
 		if (!buffer) {
+			KdPrint(("Could not get MdlAddress.\n"));
 			status = STATUS_INSUFFICIENT_RESOURCES;
 			break;
 		}
 
-
+		
 		AutoLock<FastMutex> lock(g_Struct.ServiceWorkItemsMutex);
 		while (true) {
 			if (IsListEmpty(&g_Struct.ServiceWorkItemsHead)) {
@@ -711,7 +717,7 @@ NTSTATUS IoControl(PDEVICE_OBJECT, PIRP Irp) {
 			}
 			auto entry = RemoveHeadList(&g_Struct.ServiceWorkItemsHead);
 			TaskType type = *(TaskType*)((uintptr_t)entry + sizeof(LIST_ENTRY));
-
+			KdPrint(("\nReading TaskType: %d\n", type));
 
 			switch (type) {
 				case TaskType::ScanFile:
@@ -721,6 +727,7 @@ NTSTATUS IoControl(PDEVICE_OBJECT, PIRP Irp) {
 
 					if (len < size) {
 						InsertHeadList(&g_Struct.ServiceWorkItemsHead, entry);
+						KdPrint(("Not enough space. Putting back item.\n"));
 						break;
 					}
 
