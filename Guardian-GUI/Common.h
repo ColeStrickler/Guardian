@@ -14,7 +14,10 @@ enum class ItemType : short {
 	ThreadExit,
 	RemoteThreadCreate,
 	ImageLoad,
-	BlockedExecutionPath
+	BlockedExecutionPath,
+	YaraScanFile,
+	YaraScanProcess,
+	YaraScanSystem
 };
 
 
@@ -33,4 +36,31 @@ struct RemoteThreadAlert : Header {
 struct BlockedPathAlert : Header {
 	ULONG ImageNameLength;
 	ULONG ImageNameOffset;
+};
+
+
+struct YaraScanFileAlert : Header {
+	ULONG FilePathOffset;
+	ULONG FilePathLength;
+	ULONG MatchedRulesOffset;
+	ULONG MatchedRuleCount;
+};
+
+
+typedef struct REGIONINFO
+{
+	LPVOID pBase;
+	LPVOID pAllocation;
+	DWORD dwRegion;
+	DWORD dwProtect;
+	DWORD dwState;
+	DWORD dwType;
+} RegionInfo, * PRegionInfo;
+
+struct YaraScanProcessAlert : Header {
+	RegionInfo regionInfo;
+	ULONG FilePathOffset;
+	ULONG FilePathLength;
+	ULONG MatchedRulesOffset;
+	ULONG MatchedRuleCount;
 };

@@ -64,16 +64,66 @@ void Service::StartWorkerThread() {
 				
 				auto ScanFileJob = CONTAINING_RECORD(currEntry, WorkItem<ScanFileHeaderFull>, Entry);
 				std::wstring wFilePath((wchar_t*)((BYTE*)ScanFileJob + ScanFileJob->Data.FilePathOffset), ScanFileJob->Data.Size);
-				std::wcout << "wFilePath: " << wFilePath << std::endl;
 				std::string FilePath = WstringToString(wFilePath);
-				std::cout << "After transformation: " << FilePath << std::endl;
 				YaraInfo yaraInfo = Scanner->ScanFile(FilePath);
-				std::cout << "\n\n" << std::endl;
-				std::cout << "Infected File Path: " << yaraInfo.FilePath << std::endl;
-				for (auto& rule : yaraInfo.matched_rules) {
-					std::cout << "Matched Rule: " << rule << std::endl;
+				if (yaraInfo.FilePath[0] == '0') {
+					// No matches, break.
+					break;
 				}
-				std::cout << "\n\n" << std::endl;
+
+
+				DWORD filePathlen = FilePath.size();
+				DWORD allocSize = sizeof(YaraScanFileAlert) + filePathlen;
+				DWORD matchRuleCount = 0;
+
+				for (auto& rule : yaraInfo.matched_rules) {
+					allocSize += rule.size() + 1;
+					matchRuleCount += 1;
+				}
+
+				BYTE* writeBackBuffer = RAII::HeapBuffer(allocSize).Get();
+				YaraScanFileAlert writeBackStruct;
+
+				writeBackStruct.FilePathLength = filePathlen;
+				writeBackStruct.FilePathOffset = sizeof(YaraScanFileAlert);
+				writeBackStruct.MatchedRuleCount = matchRuleCount;
+				writeBackStruct.MatchedRulesOffset = sizeof(YaraScanFileAlert) + filePathlen;
+				writeBackStruct.Size = allocSize;
+				writeBackStruct.Type = ItemType::YaraScanFile;
+				// We dont fill out the time, we will do this in the Kernel
+
+				memcpy(writeBackBuffer, &writeBackStruct, sizeof(YaraScanFileAlert));
+				memcpy(writeBackBuffer + sizeof(YaraScanFileAlert), FilePath.data(), filePathlen);
+
+				BYTE* writePtr = writeBackBuffer + writeBackStruct.MatchedRulesOffset;
+				for (auto& rule : yaraInfo.matched_rules) {
+					memcpy(writePtr, rule.data(), rule.size());
+					writePtr += rule.size();
+					memset(writePtr, 0x99, 1);
+					writePtr += 1;
+				}
+				// [YaraScanFile]
+				// [FilePathChars]
+				// [MatchedRuleChars]
+
+
+				// FOR METHOD_IN_DIRECT WE USE THE SECOND BUFFER
+				DWORD retBytes;
+				BOOL success = DeviceIoControl
+				(
+					hFile,
+					IOCTL_WRITE_ALERT,
+					0,
+					0,
+					writeBackBuffer,
+					allocSize,
+					&retBytes,
+					0
+				);
+				if (!success) {
+					printf("IOCTL ERROR ON ALERT WRITEBACK. ERROR: %d\n", GetLastError());
+				}
+
 				break;
 			}
 			case TaskType::ScanProcess:
@@ -86,7 +136,7 @@ void Service::StartWorkerThread() {
 				yaraInfo = Scanner->ScanProcess(procId);
 
 
-
+				break;
 			}
 			case TaskType::SystemScan:
 			{
@@ -96,7 +146,7 @@ void Service::StartWorkerThread() {
 				yaraInfo = Scanner->ScanSystem();
 
 
-
+				break;
 			}
 
 		}

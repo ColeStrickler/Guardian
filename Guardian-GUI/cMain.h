@@ -33,11 +33,15 @@ public:
 	int userChoicesAddBlockedFileId = 4;
 	std::vector<std::wstring> validUsers;
 
+
+	wxListBox* ScanResults = nullptr;
+	int ScanResultsId = 5;
+
 	wxButton* YaraScanFileBtn = nullptr;
-	int YaraScanFileBtnId = 5;
+	int YaraScanFileBtnId = 6;
 
 	wxTextCtrl* YaraScanFileTxtBox = nullptr;
-	int YaraScanFileTxtBoxId = 6;
+	int YaraScanFileTxtBoxId = 7;
 
 
 	wxGauge* m_statBar1 = nullptr;						// WE WILL USE THIS LATER TO GAUGE SCAN PROGRESS
@@ -67,6 +71,7 @@ private:
 	static void displayEventThread(cMain* main);
 	void initUserArray(std::vector<std::wstring> users);
 	bool CheckValidUser();
+	void PrintYaraScanFile(std::vector<std::string> matchedRules, std::string FilePath);
 
 
 

@@ -13,12 +13,64 @@
 #define IOCTL_WRITE_ALERT CTL_CODE(0x8000, 0x802, METHOD_IN_DIRECT, FILE_ANY_ACCESS)
 
 
+enum class ItemType : short {
+	None,
+	ProcessCreate,
+	ProcessExit,
+	ThreadCreate,
+	ThreadExit,
+	RemoteThreadCreate,
+	ImageLoad,
+	BlockedExecutionPath,
+	YaraScanFile,
+	YaraScanProcess,
+	YaraScanSystem
+};
+
+
+struct Header {
+	ItemType Type;
+	USHORT Size;
+	LARGE_INTEGER Time;
+};
+
+struct RemoteThreadAlert : Header {
+	ULONG ThreadId;
+	ULONG ProcessId;
+	ULONG CreatorProcess;
+};
+
+struct BlockedPathAlert : Header {
+	ULONG ImageNameLength;
+	ULONG ImageNameOffset;
+};
+
+
+struct YaraScanFileAlert : Header {
+	ULONG FilePathOffset;
+	ULONG FilePathLength;
+	ULONG MatchedRulesOffset;
+	ULONG MatchedRuleCount;
+};
+
+
+struct YaraScanProcessAlert : Header {
+	RegionInfo regionInfo;
+	ULONG FilePathOffset;
+	ULONG FilePathLength;
+	ULONG MatchedRulesOffset;
+	ULONG MatchedRuleCount;
+};
+
+
+
+
+
 template<typename T>
 struct WorkItem {
 	SLIST_ENTRY Entry;
 	T Data;
 };
-
 
 
 enum class TaskType : short {

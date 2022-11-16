@@ -12,6 +12,43 @@ wxEND_EVENT_TABLE()
 
 
 
+void cMain::PrintYaraScanFile(std::vector<std::string> matchedRules, std::string FilePath) 
+{
+    // //////<<[YARA SCAN FILE FINISHED]>>\\\\\\
+    // Scan Finish Time: 
+    // File Path:
+    // [|MATCHED RULE|]: 
+    // [|MATCHED RULE|]:
+    // [|MATCHED RULE|]:
+    ScanResults->Clear();
+
+    std::string Header("//////<<[YARA SCAN FILE FINISHED]>>\\\\\\\\\\\\");
+    SYSTEMTIME st;
+    GetSystemTime(&st);
+    char buf[200];
+    sprintf_s(buf, "Scan Finish Time: %02d:%02d:%02d:%03d", st.wHour, st.wMinute, st.wSecond, st.wMilliseconds);
+    std::string ScanFinishTime = std::string(buf);
+
+
+    std::vector<std::string> matchedRulesFormatted;
+    for (auto& s : matchedRules) {
+        char format[300];
+        sprintf_s(format, "[|MATCHED RULE|]: %s", s.c_str());
+        std::string sFormat(format);
+        matchedRules.push_back(sFormat);
+    }
+
+    ScanResults->AppendString(wxString(Header));
+    ScanResults->AppendString(wxString(ScanFinishTime));
+    for (auto& s : matchedRulesFormatted) {
+        ScanResults->AppendString(wxString(s));
+    }
+
+    return;
+}
+
+
+
 
 void cMain::DisplayInfo(BYTE* buffer, DWORD size) 
 {
@@ -26,64 +63,104 @@ void cMain::DisplayInfo(BYTE* buffer, DWORD size)
        // }
         
         switch (header->Type) {
-        case ItemType::ProcessExit:
-        {
+            case ItemType::ProcessExit:
             {
-                std::string time = DisplayTime(header->Time);
-                // auto info = (ProcessExitInfo*)buffer;
-                // printf("[*] {PROCESS EXIT} |PID-->%d|\n", info->ProcessId);
+                
+                    std::string time = DisplayTime(header->Time);
+                    // auto info = (ProcessExitInfo*)buffer;
+                    // printf("[*] {PROCESS EXIT} |PID-->%d|\n", info->ProcessId);
+                    break;
+            }
+
+            case ItemType::ProcessCreate:
+            {
+                // DisplayTime(header->Time);
+                // auto info = (ProcessCreateInfo*)buffer;
+               //  std::wstring commandLine((WCHAR*)(buffer + info->CommandLineOffset), info->CommandLineLength);
+               //  std::wstring fileImage((WCHAR*)(buffer + info->ImageFileNameOffset), info->ImageFileNameLength);
+              //   printf("offset: %d\n", info->ImageFileNameOffset);
+                // printf("[*] {PROCESS CREATION} |PID-->%d|IMAGEFILE-->%ws|CMDLINE-->%ws|\n", info->ProcessId, fileImage.c_str(), commandLine.c_str());
+                // break;
                 break;
             }
-        case ItemType::ProcessCreate:
-        {
-            // DisplayTime(header->Time);
-            // auto info = (ProcessCreateInfo*)buffer;
-           //  std::wstring commandLine((WCHAR*)(buffer + info->CommandLineOffset), info->CommandLineLength);
-           //  std::wstring fileImage((WCHAR*)(buffer + info->ImageFileNameOffset), info->ImageFileNameLength);
-          //   printf("offset: %d\n", info->ImageFileNameOffset);
-            // printf("[*] {PROCESS CREATION} |PID-->%d|IMAGEFILE-->%ws|CMDLINE-->%ws|\n", info->ProcessId, fileImage.c_str(), commandLine.c_str());
-            // break;
-            break;
-        }
-        case ItemType::RemoteThreadCreate:
-        {
-           // m_list1->AppendString(wxString("RemoteThreadCreate"));
-            std::string time = DisplayTime(header->Time);
-            auto info = (RemoteThreadAlert*)buffer;
-            auto targetId = info->ProcessId;
-            auto threadId = info->ThreadId;
-            auto creatorId = info->CreatorProcess;
-            char buf[300];
-            sprintf(buf, "%s ~ [RemoteThreadCreation]: %d --> %d.   ThreadId: %d\n", time.c_str(), creatorId, targetId, threadId);
-            std::string ret(buf);
-            wxString logString = wxString(ret.c_str());
-            AlertFeed->AppendString(logString);
-           // m_list1->AppendString(wxString("log"));
-            break;
-        }
-        case ItemType::BlockedExecutionPath:
-        {
-            std::string time = DisplayTime(header->Time);
-            auto info = (BlockedPathAlert*)buffer;
-            std::wstring imageName((WCHAR*)(buffer + info->ImageNameOffset), info->ImageNameLength);
 
-            char buf[300];
-            sprintf(buf, "%s ~ [BlockedExecutionPath]:  Path: %ws\n", time.c_str(), imageName.c_str());
-            std::string ret(buf);
-            wxString logString = wxString(ret.c_str());
-            AlertFeed->AppendString(logString);
-            break;
-        }
-        default:
-            break;
+            case ItemType::RemoteThreadCreate:
+            {
+               // m_list1->AppendString(wxString("RemoteThreadCreate"));
+                std::string time = DisplayTime(header->Time);
+                auto info = (RemoteThreadAlert*)buffer;
+                auto targetId = info->ProcessId;
+                auto threadId = info->ThreadId;
+                auto creatorId = info->CreatorProcess;
+                char buf[300];
+                sprintf(buf, "%s ~ [RemoteThreadCreation]: %d --> %d.   ThreadId: %d\n", time.c_str(), creatorId, targetId, threadId);
+                std::string ret(buf);
+                wxString logString = wxString(ret.c_str());
+                AlertFeed->AppendString(logString);
+               // m_list1->AppendString(wxString("log"));
+                break;
+            }
 
-        }
-        
+            case ItemType::BlockedExecutionPath:
+            {
+                std::string time = DisplayTime(header->Time);
+                auto info = (BlockedPathAlert*)buffer;
+                std::wstring imageName((WCHAR*)(buffer + info->ImageNameOffset), info->ImageNameLength);
+
+                char buf[300];
+                sprintf(buf, "%s ~ [BlockedExecutionPath]:  Path: %ws\n", time.c_str(), imageName.c_str());
+                std::string ret(buf);
+                wxString logString = wxString(ret.c_str());
+                AlertFeed->AppendString(logString);
+                break;
+            }
+            // NEEDS DEBUGGED
+            // NEEDS DEBUGGED
+            case ItemType::YaraScanFile:
+            {
+                std::vector<std::string> matchedRules;
+                std::string FilePath;
+                int matchCount = 0;
+                auto info = (YaraScanFileAlert*)buffer;
+                
+
+                ULONG filePathlen = info->FilePathLength;
+                FilePath = std::string((char*)(buffer + info->FilePathOffset), filePathlen);
+                matchCount = info->MatchedRuleCount;
+
+                BYTE* currPtr = buffer + info->MatchedRulesOffset;
+                while (matchCount > 0) {
+                    char path[MAX_PATH];
+                    int shift = 0;
+                    for (int i = 0; i < MAX_PATH; i++) {
+                        if (currPtr[i] = 0x99) {
+                            shift = i + 1;
+                            break;
+                        }
+                        else {
+                            path[i] = currPtr[i];
+                        }
+                    }
+                    std::string newStr = std::string(path, shift);
+                    matchedRules.push_back(newStr);
+                    currPtr += shift;
+                    matchCount -= 1;
+                }
+
+                PrintYaraScanFile(matchedRules, FilePath);
+                break;
+            }
+
+            default:
+                break;
+
         }
         buffer += header->Size;
         count -= header->Size;
     }
+        
 }
+
 
 
 void cMain::displayEventThread(cMain* main) 
@@ -146,8 +223,14 @@ cMain::cMain() : wxFrame(nullptr, wxID_ANY, "Guardian", wxPoint(30, 30), wxSize(
 
 
     // EVENT/ALERT FEED
-	AlertFeed = new wxListBox(this, wxID_ANY, wxPoint(10, 210), wxSize(900, 400));
+	AlertFeed = new wxListBox(this, wxID_ANY, wxPoint(10, 210), wxSize(500, 400));
     hEventThread = CreateThread(0, 0, reinterpret_cast<LPTHREAD_START_ROUTINE>(displayEventThread), this, 0, 0);
+
+
+    // SCAN RESULTS TEXT BOX
+    ScanResults = new wxListBox(this, wxID_ANY, wxPoint(510, 210), wxSize(500, 400));
+    // --> Results will be written by the EventThread
+
 }
 
 cMain::~cMain() {

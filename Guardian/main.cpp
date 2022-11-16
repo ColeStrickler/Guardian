@@ -336,9 +336,16 @@ void Unload(PDRIVER_OBJECT DriverObject) {
 				ExFreePool(CONTAINING_RECORD(entry, Alert<RemoteThreadAlert>, Entry));
 				break;
 			}
+
 			case (short)ItemType::BlockedExecutionPath:
 			{
 				ExFreePool(CONTAINING_RECORD(entry, Alert<BlockedPathAlert>, Entry));
+				break;
+			}
+			
+			case (short)ItemType::YaraScanFile:
+			{
+				ExFreePool(CONTAINING_RECORD(entry, Alert<YaraScanFileAlert>, Entry));
 				break;
 			}
 		}	
@@ -789,6 +796,54 @@ NTSTATUS IoControl(PDEVICE_OBJECT, PIRP Irp) {
 		break;
 	}
 
+
+	case IOCTL_WRITE_ALERT:
+	{
+		KdPrint((DRIVER_PREFIX "[IOCTL_WRITE_ALERT]\n"));
+		// DIRECT IO BECAUSE THIS COULD BE A LARGE BUFFER
+		NT_ASSERT(Irp->MdlAddress);
+		//auto len = stack->Parameters.DeviceIoControl.OutputBufferLength;
+		auto buffer = (UCHAR*)MmGetSystemAddressForMdlSafe(Irp->MdlAddress, NormalPagePriority);
+		if (!buffer) {
+			KdPrint(("Could not get MdlAddress.\n"));
+			status = STATUS_INSUFFICIENT_RESOURCES;
+			break;
+		}
+
+		auto type = ((Header*)buffer)->Type;
+		switch (type) {
+			case ItemType::YaraScanFile:
+			{
+				YaraScanFileAlert* readAlert = (YaraScanFileAlert*)buffer;
+				ULONG allocSize = readAlert->Size - sizeof(YaraScanFileAlert);
+				allocSize += sizeof(Alert<YaraScanFileAlert>);
+
+				auto newAlert = (Alert<YaraScanFileAlert>*)ExAllocatePoolWithTag(NonPagedPool, allocSize, DRIVER_TAG);
+				memcpy(&newAlert->Data, buffer, allocSize);
+
+				PushItem(&newAlert->Entry, &g_Struct.AlertsHead, g_Struct.AlertsHeadMutex, g_Struct.AlertCount);
+				break;
+			}
+
+			case ItemType::YaraScanProcess:
+			{
+
+			}
+
+			case ItemType::YaraScanSystem:
+			{
+
+			}
+
+			default:
+				break;
+		}
+
+
+
+
+		break;
+	}
 
 
 	default:
