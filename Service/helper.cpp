@@ -7,8 +7,8 @@ std::string ConvToLowerA(std::string a)
 	std::transform(a.begin(), a.end(), a.begin(), ::tolower);
 	return a;
 }
-BOOL VectorContainsStringA(std::vector<std::string> haystack, std::string
-	needle)
+
+BOOL VectorContainsStringA(std::vector<std::string> haystack, std::string needle)
 {
 	for (std::string& hay : haystack)
 	{
@@ -27,4 +27,12 @@ std::string WstringToString(std::wstring wstr) {
 	sprintf_s((char*)strbuffer.Get(), len, "%ws", wstr.data());
 	std::string ret = std::string((char*)strbuffer.Get());
 	return ret;
+}
+
+
+std::string ReadFileToStringA(std::string path)
+{
+	std::ifstream t(path);
+	std::string str((std::istreambuf_iterator<char>(t)), std::istreambuf_iterator<char>());
+	return str;
 }

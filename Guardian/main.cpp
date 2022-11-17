@@ -559,6 +559,11 @@ void OnThreadNotify(HANDLE ProcessId, HANDLE ThreadId, BOOLEAN Create) {
 
 
 NTSTATUS IoControl(PDEVICE_OBJECT, PIRP Irp) {
+	if (KeGetCurrentIrql() != PASSIVE_LEVEL) {
+		return STATUS_INVALID_DEVICE_STATE;
+	}
+
+
 	NTSTATUS status = STATUS_SUCCESS;
 	auto stack = IoGetCurrentIrpStackLocation(Irp);
 	auto count = 0;
@@ -819,7 +824,7 @@ NTSTATUS IoControl(PDEVICE_OBJECT, PIRP Irp) {
 				allocSize += sizeof(Alert<YaraScanFileAlert>);
 
 				auto newAlert = (Alert<YaraScanFileAlert>*)ExAllocatePoolWithTag(NonPagedPool, allocSize, DRIVER_TAG);
-				memcpy(&newAlert->Data, buffer, allocSize);
+				memcpy(&newAlert->Data, buffer, readAlert->Size);
 
 				PushItem(&newAlert->Entry, &g_Struct.AlertsHead, g_Struct.AlertsHeadMutex, g_Struct.AlertCount);
 				break;
@@ -827,12 +832,12 @@ NTSTATUS IoControl(PDEVICE_OBJECT, PIRP Irp) {
 
 			case ItemType::YaraScanProcess:
 			{
-
+				break;
 			}
 
 			case ItemType::YaraScanSystem:
 			{
-
+				break;
 			}
 
 			default:

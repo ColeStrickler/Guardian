@@ -50,14 +50,38 @@ RAII::HeapBuffer::HeapBuffer(size_t size) {
     buf = (BYTE*)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, size);
 }
 
+
+
 BYTE* RAII::HeapBuffer::Get() {
     return buf;
 }
+
 RAII::HeapBuffer::~HeapBuffer() {
     if (buf != nullptr) {
         HeapFree(GetProcessHeap(), NULL, buf);
     }
 }
+
+
+
+RAII::NewBuffer::NewBuffer(size_t size) {
+    buf = new BYTE[size];
+    memset(buf, 0, size);
+}
+
+RAII::NewBuffer::NewBuffer(BYTE* buffer) {
+    buf = buffer;
+}
+
+RAII::NewBuffer::~NewBuffer() {
+    delete buf;
+}
+
+BYTE* RAII::NewBuffer::Get() {
+    return buf;
+}
+
+
 
 
 

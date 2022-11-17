@@ -40,9 +40,9 @@ Service::Service() {
 }
 
 Service::~Service() {
-
+	printf("Last Error --> %d", GetLastError());
 }
-
+// FOR SOME REASON THIS FAILS ON LONG FILE PATHS
 void Service::StartWorkerThread() {
 
 	while (true) {
@@ -53,7 +53,7 @@ void Service::StartWorkerThread() {
 		printf("Found new work item in Worker Thread!\n");
 
 		PSLIST_ENTRY currEntry = InterlockedPopEntrySList(&workItemsHead);
-		workItemsCount--;
+		workItemsCount -= 1;
 		TaskType EntryType = *(TaskType*)((uintptr_t)currEntry + sizeof(SLIST_ENTRY));
 		
 		printf("New work item type: %d\n", EntryType);
@@ -65,9 +65,13 @@ void Service::StartWorkerThread() {
 				auto ScanFileJob = CONTAINING_RECORD(currEntry, WorkItem<ScanFileHeaderFull>, Entry);
 				std::wstring wFilePath((wchar_t*)((BYTE*)ScanFileJob + ScanFileJob->Data.FilePathOffset), ScanFileJob->Data.Size);
 				std::string FilePath = WstringToString(wFilePath);
+				bool heapfreeCheck = HeapFree(GetProcessHeap(), NULL, (void*)ScanFileJob);
+				printf("HeapFree check: %d\n", heapfreeCheck);
+				std::cout << FilePath << std::endl;
 				YaraInfo yaraInfo = Scanner->ScanFile(FilePath);
 				if (yaraInfo.FilePath[0] == '0') {
 					// No matches, break.
+					printf("No matches, break!\n");
 					break;
 				}
 
@@ -81,7 +85,9 @@ void Service::StartWorkerThread() {
 					matchRuleCount += 1;
 				}
 
-				BYTE* writeBackBuffer = RAII::HeapBuffer(allocSize).Get();
+				//BYTE* writeBackBuffer = RAII::HeapBuffer(allocSize).Get();
+				RAII::NewBuffer writeBackBuf(allocSize);
+				BYTE* writeBackBuffer = writeBackBuf.Get();
 				YaraScanFileAlert writeBackStruct;
 
 				writeBackStruct.FilePathLength = filePathlen;
@@ -98,9 +104,7 @@ void Service::StartWorkerThread() {
 				BYTE* writePtr = writeBackBuffer + writeBackStruct.MatchedRulesOffset;
 				for (auto& rule : yaraInfo.matched_rules) {
 					memcpy(writePtr, rule.data(), rule.size());
-					writePtr += rule.size();
-					memset(writePtr, 0x99, 1);
-					writePtr += 1;
+					writePtr += rule.size() + 1;
 				}
 				// [YaraScanFile]
 				// [FilePathChars]
@@ -120,11 +124,8 @@ void Service::StartWorkerThread() {
 					&retBytes,
 					0
 				);
-				if (!success) {
-					printf("IOCTL ERROR ON ALERT WRITEBACK. ERROR: %d\n", GetLastError());
-				}
-
 				break;
+				
 			}
 			case TaskType::ScanProcess:
 			{
@@ -148,9 +149,13 @@ void Service::StartWorkerThread() {
 
 				break;
 			}
+			default:
+				printf("default\n");
+				break;
 
 		}
-		
+		printf("bottom\n");
+		continue;
 
 
 
@@ -205,19 +210,39 @@ void Service::StartDriverReadThread() {
 			switch (header->Type) {					// FROM HERE WE, WE REALLOCATE THESE OBJECTS AND PLACE THEM IN THE WORKER THREAD
 				case TaskType::ScanFile:
 				{
+					printf("[SCAN FILE TYPE]\n");
+					WorkItem<ScanFileHeaderFull>* NewScanFileTask;
 					auto ScanFileTask = (ScanFileHeaderJob*)buffer;
 					DWORD allocSize = sizeof(WorkItem<ScanFileHeaderFull>) + ScanFileTask->FilePathLength;
-					auto NewScanFileTask = (WorkItem<ScanFileHeaderFull>*)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, allocSize);
-
+					
+					printf("Read file path length\n");
+					HANDLE heap = GetProcessHeap();
+					if (!heap) {
+						printf("Could not get heap. ERROR: %d\n", GetLastError());
+						continue;
+					}
+					printf("Got heap!\n");
+					Sleep(2000);
+					try {
+						NewScanFileTask = (WorkItem<ScanFileHeaderFull>*)HeapAlloc(heap, HEAP_ZERO_MEMORY, allocSize);
+					}
+					catch (...) {
+						printf("ERROR ALLOCATING HEAP --> %d\tCONTINUING...\n");
+						continue;
+					}
+					
+					printf("Allocated heap\n");
 
 					NewScanFileTask->Data.FilePathOffset = sizeof(WorkItem<ScanFileHeaderFull>);
 					memcpy((BYTE*)NewScanFileTask + sizeof(WorkItem<ScanFileHeaderFull>), buffer + ScanFileTask->FilePathOffset, ScanFileTask->FilePathLength);
+					printf("Copied over file path to end of struct\n");
 					NewScanFileTask->Data.FilePathLength = ScanFileTask->FilePathLength;
 					NewScanFileTask->Data.Size = allocSize;			// We will ignore this field in User mode
 					NewScanFileTask->Data.Type = TaskType::ScanFile;
 
-
+					printf("Attempting to push to entry list\n");
 					InterlockedPushEntrySList(&workItemsHead, &NewScanFileTask->Entry);
+					printf("Pushed scan file task.\n");
 					workItemsCount++;
 					break;
 				}

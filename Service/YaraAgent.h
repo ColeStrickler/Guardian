@@ -52,6 +52,8 @@ namespace Yara {
 	private:
 		BOOL CreateCompiler();
 		BOOL AddRuleFromFile(std::string file_name);
+		BOOL LoadRule(std::string path, BOOL bVerbose);
+		BOOL AddRulesFromDirectory(std::string rule_directory, BOOL bVerbose);
 		std::vector<RegionInfo> GetProcessRegions(HANDLE hProcess);
 		static int GetYaraMatches(YR_SCAN_CONTEXT* context, int message, void* message_data, void* user_data);
 

@@ -26,6 +26,19 @@ namespace RAII
     private:
         BYTE* buf;
     };
+
+
+    class NewBuffer
+    {
+    public:
+        NewBuffer(size_t size);
+        NewBuffer(BYTE* buffer);
+        BYTE* Get();
+        ~NewBuffer();
+    private:
+        BYTE* buf;
+    };
+
 }
 
 

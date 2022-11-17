@@ -16,15 +16,7 @@ Yara::Scanner::Scanner(std::string YaraConfFilePath)
 	}
 	
 	if (bSetup) {
-		for (const auto& file : std::filesystem::recursive_directory_iterator(YaraConfFilePath)) {
-			std::cout << file << std::endl;
-			if (".yar" != file.path().extension()) {
-				continue;
-			}
-			if (AddRuleFromFile(file.path().string())) {
-				RuleCount++;
-			}
-		}
+		AddRulesFromDirectory(YaraConfFilePath, TRUE);
 		int result = yr_compiler_get_rules(compiler, &rules);
 		if (result != ERROR_SUCCESS) {
 			printf("Yara ProcessScanner initialize failed during rule initialization: %d\n", GetLastError());
@@ -49,6 +41,8 @@ BOOL Yara::Scanner::CreateCompiler()
 {
 	int check = yr_compiler_create(&compiler);
 
+	
+
 	if (check == ERROR_SUCCESS) {
 		return TRUE;
 	}
@@ -57,6 +51,65 @@ BOOL Yara::Scanner::CreateCompiler()
 	}
 }
 
+
+BOOL Yara::Scanner::LoadRule(std::string path, BOOL bVerbose)
+{
+	std::string rule = ReadFileToStringA(path);
+
+	if (rule.empty())
+	{
+		return TRUE;
+	}
+
+	// Add the rule to the compiler
+	int result = yr_compiler_add_string(compiler, rule.c_str(), nullptr);
+	if (result != ERROR_SUCCESS)
+	{
+		if (bVerbose) printf("Failed to add rules from %s: %d\n", path.c_str(), GetLastError());
+		return FALSE;
+	}
+	else
+	{
+		return TRUE;
+	}
+}
+
+
+
+BOOL Yara::Scanner::AddRulesFromDirectory(std::string rule_directory, BOOL bVerbose)
+{
+	int file_count = 0;
+	int succes_count = 0;
+
+	for (const auto& dirEntry : std::filesystem::recursive_directory_iterator(rule_directory))
+	{
+		if (".yar" != dirEntry.path().extension())
+		{
+			continue;
+		}
+		if (LoadRule(dirEntry.path().string(), bVerbose))
+		{
+			succes_count++;
+		}
+		file_count++;
+	}
+
+	printf("\\_ Added %ld/%ld rules!\n", succes_count, file_count);
+
+	// Check the rule was added
+	int result = yr_compiler_get_rules(compiler, &rules);
+
+	if (result != ERROR_SUCCESS)
+	{
+		printf("Failed to get rules from %s: %d\n", rule_directory.c_str(), GetLastError());
+		return FALSE;
+	}
+	else
+	{
+		printf("\\_ Successfully verified rules!\n");
+		return TRUE;
+	}
+}
 
 
 BOOL Yara::Scanner::AddRuleFromFile(std::string file_name)
@@ -67,18 +120,20 @@ BOOL Yara::Scanner::AddRuleFromFile(std::string file_name)
 		printf("Failed to add rule from %s --> ERROR: \n", file_name.c_str(), GetLastError());
 		return FALSE;
 	}
-
+	printf("Opened the file!\n");
 	result = yr_compiler_add_file(compiler, rule_file, NULL, file_name.c_str());
+	printf("got here\n");
 	if (result != ERROR_SUCCESS) {
 		printf("Failed to compile rule from %s --> ERROR: \n", file_name.c_str(), GetLastError());
 		return FALSE;
 	}
-
+	printf("Compiled the file!\n");
 	result = yr_compiler_get_rules(compiler, &rules);
 	if (result != ERROR_SUCCESS) {
 		printf("Failed to compile rule from %s --> ERROR: \n", file_name.c_str(), GetLastError());
 		return FALSE;
 	}
+	printf("Compiled got the rules!\n");
 	return TRUE;
 }
 
@@ -164,7 +219,7 @@ int Yara::Scanner::GetYaraMatches(YR_SCAN_CONTEXT* context, int message, void* m
 			}
 		}
 	}
-
+	printf("returning from yara callback...\n");
 	return CALLBACK_CONTINUE;
 }
 

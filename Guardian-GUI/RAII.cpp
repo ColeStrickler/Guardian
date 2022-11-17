@@ -59,5 +59,24 @@ RAII::HeapBuffer::~HeapBuffer() {
     }
 }
 
+RAII::NewBuffer::NewBuffer(size_t size) {
+    buf = new BYTE[size];
+    memset(buf, 0, size);
+}
+
+
+RAII::NewBuffer::NewBuffer(BYTE* buffer) {
+    buf = buffer;
+}
+
+RAII::NewBuffer::~NewBuffer() {
+    delete buf;
+}
+
+BYTE* RAII::NewBuffer::Get() {
+    return buf;
+}
+
+
 
 

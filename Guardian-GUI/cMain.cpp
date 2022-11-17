@@ -30,15 +30,23 @@ void cMain::PrintYaraScanFile(std::vector<std::string> matchedRules, std::string
     std::string ScanFinishTime = std::string(buf);
 
 
+    char buf2[300];
+    sprintf_s(buf2, "File Path: %s", FilePath.c_str());
+    std::string FilePathFormat(buf2);
+
+
+
+
     std::vector<std::string> matchedRulesFormatted;
     for (auto& s : matchedRules) {
         char format[300];
-        sprintf_s(format, "[|MATCHED RULE|]: %s", s.c_str());
+        sprintf_s(format, "[MATCHED RULE]: %s", s.c_str());
         std::string sFormat(format);
-        matchedRules.push_back(sFormat);
+        matchedRulesFormatted.push_back(sFormat);
     }
 
     ScanResults->AppendString(wxString(Header));
+    ScanResults->AppendString(wxString(FilePathFormat));
     ScanResults->AppendString(wxString(ScanFinishTime));
     for (auto& s : matchedRulesFormatted) {
         ScanResults->AppendString(wxString(s));
@@ -130,21 +138,10 @@ void cMain::DisplayInfo(BYTE* buffer, DWORD size)
 
                 BYTE* currPtr = buffer + info->MatchedRulesOffset;
                 while (matchCount > 0) {
-                    char path[MAX_PATH];
-                    int shift = 0;
-                    for (int i = 0; i < MAX_PATH; i++) {
-                        if (currPtr[i] = 0x99) {
-                            shift = i + 1;
-                            break;
-                        }
-                        else {
-                            path[i] = currPtr[i];
-                        }
-                    }
-                    std::string newStr = std::string(path, shift);
-                    matchedRules.push_back(newStr);
-                    currPtr += shift;
-                    matchCount -= 1;
+                    std::string rule((char*)currPtr);
+                    matchedRules.push_back(rule);
+                    currPtr += rule.size() + 1;
+                    matchCount--;
                 }
 
                 PrintYaraScanFile(matchedRules, FilePath);
@@ -181,6 +178,7 @@ void cMain::displayEventThread(cMain* main)
         if (bytes != 0) {
             main->DisplayInfo(buffer, bytes);
         }
+
         Sleep(200);
     }
     
@@ -435,16 +433,12 @@ void cMain::YaraScanFile(wxCommandEvent& evt) {
         0
     );
 
-    YaraScanFileTxtBox->Clear();
-    //MessageBoxW(NULL, (wchar_t*)(buffer + sizeof(ScanFileHeaderJob)), L"Error", MB_ICONERROR | MB_DEFBUTTON1);
-    std::wstring check2((wchar_t*)(buffer + sizeof(ScanFileHeaderJob)), filePath.size() * 2);
-    MessageBoxW(NULL, check2.c_str(), L"Error2", MB_ICONERROR | MB_DEFBUTTON1);
-    YaraScanFileTxtBox->AppendText(wxString(((wchar_t*)(buffer + sizeof(ScanFileHeaderJob)))));
+
 
 
     if (check) {
-       // YaraScanFileTxtBox->Clear();
-       // YaraScanFileTxtBox->AppendText(wxString("Started scan successfully."));
+       YaraScanFileTxtBox->Clear();
+       YaraScanFileTxtBox->AppendText(wxString("Started scan successfully."));
     }
     else {
         YaraScanFileTxtBox->Clear();
