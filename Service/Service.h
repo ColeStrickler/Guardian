@@ -4,6 +4,7 @@
 #include <string>
 #include "RAII.h"
 #include "YaraAgent.h"
+#include <unordered_set>
 #include <iostream>
 // TEMP
 #include <iostream>
@@ -55,9 +56,7 @@ struct YaraScanFileAlert : Header {
 
 
 struct YaraScanProcessAlert : Header {
-	RegionInfo regionInfo;
-	ULONG FilePathOffset;
-	ULONG FilePathLength;
+	ULONG processId;
 	ULONG MatchedRulesOffset;
 	ULONG MatchedRuleCount;
 };

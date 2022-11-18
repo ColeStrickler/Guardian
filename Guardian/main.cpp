@@ -832,6 +832,14 @@ NTSTATUS IoControl(PDEVICE_OBJECT, PIRP Irp) {
 
 			case ItemType::YaraScanProcess:
 			{
+				YaraScanProcessAlert* readAlert = (YaraScanProcessAlert*)buffer;
+				ULONG allocSize = readAlert->Size - sizeof(YaraScanProcessAlert);
+				allocSize += sizeof(Alert<YaraScanProcessAlert>);
+
+				auto newAlert = (Alert<YaraScanFileAlert>*)ExAllocatePoolWithTag(NonPagedPool, allocSize, DRIVER_TAG);
+				memcpy(&newAlert->Data, buffer, readAlert->Size);
+
+				PushItem(&newAlert->Entry, &g_Struct.AlertsHead, g_Struct.AlertsHeadMutex, g_Struct.AlertCount);
 				break;
 			}
 
@@ -841,7 +849,7 @@ NTSTATUS IoControl(PDEVICE_OBJECT, PIRP Irp) {
 			}
 
 			default:
-				break;
+				break; 
 		}
 
 

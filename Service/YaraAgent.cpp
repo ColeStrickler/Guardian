@@ -219,7 +219,7 @@ int Yara::Scanner::GetYaraMatches(YR_SCAN_CONTEXT* context, int message, void* m
 			}
 		}
 	}
-	printf("returning from yara callback...\n");
+
 	return CALLBACK_CONTINUE;
 }
 
@@ -232,7 +232,7 @@ std::vector<YaraInfo> Yara::Scanner::ScanProcess(DWORD procId)
 {
 	RAII::Handle hProc = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, procId);
 	std::vector<YaraInfo> retInfo;
-	if (!hProc.Get()) {
+	if (hProc.Empty()) {
 		printf("Yara::Scanner::ScanProcess() unable to obtain handle to process --> %d\n", GetLastError());
 		return retInfo;
 	}

@@ -85,7 +85,6 @@ void Service::StartWorkerThread() {
 					matchRuleCount += 1;
 				}
 
-				//BYTE* writeBackBuffer = RAII::HeapBuffer(allocSize).Get();
 				RAII::NewBuffer writeBackBuf(allocSize);
 				BYTE* writeBackBuffer = writeBackBuf.Get();
 				YaraScanFileAlert writeBackStruct;
@@ -106,7 +105,7 @@ void Service::StartWorkerThread() {
 					memcpy(writePtr, rule.data(), rule.size());
 					writePtr += rule.size() + 1;
 				}
-				// [YaraScanFile]
+				// [YaraScanFileAlert]
 				// [FilePathChars]
 				// [MatchedRuleChars]
 
@@ -131,10 +130,62 @@ void Service::StartWorkerThread() {
 			{
 				auto ScanProcessJob = CONTAINING_RECORD(currEntry, WorkItem<ScanProcessHeaderFull>, Entry);
 				DWORD procId = (DWORD)ScanProcessJob->Data.ProcessId;
+				if (!ProcIdExists(procId)) {// check this twice to make sure there has been no change	
+					printf("[Scan Process]: PID does not exist!\n");
+					break;
+				} 
+				printf("pid: %d, procName: %s\n", procId, GetProcnameFromId(procId).c_str());
 
 
 				std::vector<YaraInfo> yaraInfo;
 				yaraInfo = Scanner->ScanProcess(procId);
+				DWORD allocSize = sizeof(YaraScanProcessAlert);
+				DWORD ruleCount = 0;
+				
+				std::unordered_set<std::string> set;
+				for (auto& yr : yaraInfo) {
+					for (auto& s : yr.matched_rules) {
+						if (set.count(s)) {
+							continue;
+						}
+						allocSize += s.size() + 1;
+						ruleCount += 1;
+						set.insert(s);
+					}
+				}
+				auto writeBackBuffer = RAII::NewBuffer(allocSize).Get();
+				YaraScanProcessAlert writeBackStruct;
+
+				writeBackStruct.Size = allocSize;
+				writeBackStruct.Type = ItemType::YaraScanProcess;
+				writeBackStruct.MatchedRulesOffset = sizeof(YaraScanProcessAlert);
+				writeBackStruct.MatchedRuleCount = ruleCount;
+				writeBackStruct.processId = procId;
+
+				memcpy(writeBackBuffer, &writeBackStruct, sizeof(YaraScanProcessAlert));
+				BYTE* writePtr = writeBackBuffer + sizeof(YaraScanProcessAlert);
+				for (auto& s : set) {
+					memcpy(writePtr, s.data(), s.size());
+					writePtr += s.size() + 1;
+				}
+				// [YaraScanProcessAlert]
+				// [MatchedRuleChars]
+
+
+				// FOR METHOD_IN_DIRECT WE USE THE SECOND BUFFER
+
+				DWORD retBytes;
+				BOOL success = DeviceIoControl
+				(
+					hFile,
+					IOCTL_WRITE_ALERT,
+					0,
+					0,
+					writeBackBuffer,
+					allocSize,
+					&retBytes,
+					0
+				);
 
 
 				break;
@@ -215,14 +266,11 @@ void Service::StartDriverReadThread() {
 					auto ScanFileTask = (ScanFileHeaderJob*)buffer;
 					DWORD allocSize = sizeof(WorkItem<ScanFileHeaderFull>) + ScanFileTask->FilePathLength;
 					
-					printf("Read file path length\n");
 					HANDLE heap = GetProcessHeap();
 					if (!heap) {
 						printf("Could not get heap. ERROR: %d\n", GetLastError());
 						continue;
 					}
-					printf("Got heap!\n");
-					Sleep(2000);
 					try {
 						NewScanFileTask = (WorkItem<ScanFileHeaderFull>*)HeapAlloc(heap, HEAP_ZERO_MEMORY, allocSize);
 					}

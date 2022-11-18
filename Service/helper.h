@@ -5,8 +5,13 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <TlHelp32.h>
 #include "RAII.h"
 
+
+#define Process32First Process32First
+#define Process32Next Process32Next
+#define PROCESSENTRY32 PROCESSENTRY32
 std::string ConvToLowerA(std::string a);
 
 
@@ -17,3 +22,7 @@ std::string WstringToString(std::wstring wstr);
 
 
 std::string ReadFileToStringA(std::string path);
+
+BOOL ProcIdExists(DWORD procId);
+
+std::string GetProcnameFromId(DWORD procId);

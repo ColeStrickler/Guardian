@@ -43,6 +43,11 @@ public:
 	wxTextCtrl* YaraScanFileTxtBox = nullptr;
 	int YaraScanFileTxtBoxId = 7;
 
+	wxButton* YaraScanProcessBtn = nullptr;
+	int YaraScanProcessBtnId = 8;
+
+	wxTextCtrl* YaraScanProcessTxtBox = nullptr;
+	int YaraScanProcessTxtBoxId = 9;
 
 	wxGauge* m_statBar1 = nullptr;						// WE WILL USE THIS LATER TO GAUGE SCAN PROGRESS
 
@@ -62,6 +67,7 @@ public:
 public:
 	void AddBlockedFilePathBtnFunc(wxCommandEvent& evt);
 	void YaraScanFile(wxCommandEvent& evt);
+	void YaraScanProcess(wxCommandEvent& evt);
 	void DisplayInfo(BYTE* buffer, DWORD size);
 	
 
@@ -72,7 +78,7 @@ private:
 	void initUserArray(std::vector<std::wstring> users);
 	bool CheckValidUser();
 	void PrintYaraScanFile(std::vector<std::string> matchedRules, std::string FilePath);
-
+	void PrintYaraScanProcess(std::vector<std::string> matchedRules, std::string ProcName, DWORD processId);
 
 
 // PRIVATE VARIABLES

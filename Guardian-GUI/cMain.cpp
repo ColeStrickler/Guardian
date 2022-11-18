@@ -5,11 +5,57 @@ wxBEGIN_EVENT_TABLE(cMain, wxFrame)
 // link an id to a function
 EVT_BUTTON(10001, AddBlockedFilePathBtnFunc)
 EVT_BUTTON(10002, YaraScanFile)
+EVT_BUTTON(10003, YaraScanProcess)
+
 
 wxEND_EVENT_TABLE()
 
 
+void cMain::PrintYaraScanProcess(std::vector<std::string> matchedRules, std::string ProcName, DWORD processId)
+{
+    // //////<<[YARA SCAN PROCESS FINISHED]>>\\\\\\
+    // Scan Finish Time: 
+    // Process Name:
+    // Process Id: 
+    // [|MATCHED RULE|]: 
+    // [|MATCHED RULE|]:
+    // [|MATCHED RULE|]:
+    ScanResults->Clear();
 
+    std::string Header("//////<<[YARA SCAN PROCESS FINISHED]>>\\\\\\\\\\\\");
+    SYSTEMTIME st;
+    GetSystemTime(&st);
+    char buf[200];
+    sprintf_s(buf, "Scan Finish Time: %02d:%02d:%02d:%03d", st.wHour, st.wMinute, st.wSecond, st.wMilliseconds);
+    std::string ScanFinishTime = std::string(buf);
+
+    char buf2[300];
+    sprintf_s(buf2, "Process Name: %s", ProcName.c_str());
+    std::string ProcessNameFormat(buf2);
+
+    char buf3[300];
+    sprintf_s(buf3, "Process Id: %d", processId);
+    std::string PidFormat(buf3);
+
+    std::vector<std::string> matchedRulesFormatted;
+    for (auto& s : matchedRules) {
+        char format[300];
+        sprintf_s(format, "[MATCHED RULE]: %s", s.c_str());
+        std::string sFormat(format);
+        matchedRulesFormatted.push_back(sFormat);
+    }
+
+
+    ScanResults->AppendString(wxString(Header));
+    ScanResults->AppendString(wxString(ScanFinishTime));
+    ScanResults->AppendString(wxString(ProcessNameFormat));
+    ScanResults->AppendString(wxString(PidFormat));
+    for (auto& s : matchedRulesFormatted) {
+        ScanResults->AppendString(wxString(s));
+    }
+
+    return;
+}
 
 
 void cMain::PrintYaraScanFile(std::vector<std::string> matchedRules, std::string FilePath) 
@@ -34,9 +80,6 @@ void cMain::PrintYaraScanFile(std::vector<std::string> matchedRules, std::string
     sprintf_s(buf2, "File Path: %s", FilePath.c_str());
     std::string FilePathFormat(buf2);
 
-
-
-
     std::vector<std::string> matchedRulesFormatted;
     for (auto& s : matchedRules) {
         char format[300];
@@ -46,8 +89,8 @@ void cMain::PrintYaraScanFile(std::vector<std::string> matchedRules, std::string
     }
 
     ScanResults->AppendString(wxString(Header));
-    ScanResults->AppendString(wxString(FilePathFormat));
     ScanResults->AppendString(wxString(ScanFinishTime));
+    ScanResults->AppendString(wxString(FilePathFormat));
     for (auto& s : matchedRulesFormatted) {
         ScanResults->AppendString(wxString(s));
     }
@@ -148,6 +191,33 @@ void cMain::DisplayInfo(BYTE* buffer, DWORD size)
                 break;
             }
 
+            case ItemType::YaraScanProcess:
+            {
+                std::vector<std::string> matchedRules;
+                int matchCount = 0;
+                auto info = (YaraScanProcessAlert*)buffer;
+
+
+                matchCount = info->MatchedRuleCount;
+                DWORD pid = info->processId;
+                std::string procName;
+                if (ProcIdExists(pid)) {
+                    procName = GetProcnameFromId(pid);
+                }
+
+                BYTE* currPtr = buffer + info->MatchedRulesOffset;
+                while (matchCount > 0) {
+                    std::string rule((char*)currPtr);
+                    matchedRules.push_back(rule);
+                    currPtr += rule.size() + 1;
+                    matchCount--;
+                }
+
+
+                PrintYaraScanProcess(matchedRules, procName, pid);
+                break;
+            }
+
             default:
                 break;
 
@@ -215,10 +285,12 @@ cMain::cMain() : wxFrame(nullptr, wxID_ANY, "Guardian", wxPoint(30, 30), wxSize(
 
     
     // YARA SCAN FILE BUTTON
-    YaraScanFileBtn = new wxButton(this, 10002, "Yara scan a file", wxPoint(10, 40), wxSize(200, 20));
+    YaraScanFileBtn = new wxButton(this, 10002, "Yara scan file", wxPoint(10, 40), wxSize(200, 20));
     YaraScanFileTxtBox = new wxTextCtrl(this, wxID_ANY, "<file path>", wxPoint(210, 40), wxSize(200, 20));
 
-
+    // YARA SCAN PROCESS BUTTON
+    YaraScanProcessBtn = new wxButton(this, 10003, "Yara scan PID", wxPoint(10, 60), wxSize(200, 20));
+    YaraScanProcessTxtBox = new wxTextCtrl(this, wxID_ANY, "<process id>", wxPoint(210, 60), wxSize(200, 20));
 
     // EVENT/ALERT FEED
 	AlertFeed = new wxListBox(this, wxID_ANY, wxPoint(10, 210), wxSize(500, 400));
@@ -392,7 +464,8 @@ void cMain::AddBlockedFilePathBtnFunc(wxCommandEvent& evt)
 }
 
 
-void cMain::YaraScanFile(wxCommandEvent& evt) {
+void cMain::YaraScanFile(wxCommandEvent& evt) 
+{
     std::wstring filePath = std::wstring((YaraScanFileTxtBox->GetValue()).wc_str());
     bool check = FileExists(filePath.c_str());
     if (!check) {
@@ -447,4 +520,65 @@ void cMain::YaraScanFile(wxCommandEvent& evt) {
 
     evt.Skip();
     return;
+}
+
+
+void cMain::YaraScanProcess(wxCommandEvent& evt)
+{
+    std::wstring filePath = std::wstring((YaraScanProcessTxtBox->GetValue()).wc_str());
+    DWORD procId = atoi(YaraScanProcessTxtBox->GetValue().mb_str().data());
+
+    char buf[40];
+    sprintf(buf, "%d", procId);
+    MessageBoxA(NULL, buf, "Error", MB_ICONERROR | MB_DEFBUTTON1);
+
+
+    if (!ProcIdExists(procId)) {
+        MessageBoxA(NULL, "Process Id does not exist.", "Error", MB_ICONERROR | MB_DEFBUTTON1);
+        evt.Skip();
+        return;
+    }
+
+    DWORD allocSize = sizeof(ScanProcessHeaderJob);
+    auto buffer = RAII::NewBuffer(allocSize).Get();
+    if (buffer == nullptr) {
+        MessageBoxA(NULL, "Unable to allocate heap for IO.", "Error", MB_ICONERROR | MB_DEFBUTTON1);
+        evt.Skip();
+        return;
+    }
+
+    ScanProcessHeaderJob NewScanProcessJob;
+    NewScanProcessJob.ProcessId = procId;
+    NewScanProcessJob.Size = allocSize;
+    NewScanProcessJob.Type = TaskType::ScanProcess;
+
+    memcpy(buffer, &NewScanProcessJob, allocSize);
+
+    DWORD retBytes;
+    // https://stackoverflow.com/questions/26329328/pass-deviceiocontrol-input-buffer-with-directio
+    // THERE ARE TWO INPUT BUFFERS WHEN DIRECT IO IS SPECIFIED, THE FIRST IS AVAILABLE TO THE DRIVER THROUGH THE SYSTEM BUFFER,
+    // THE SECOND IS AVAILABLE THROUGH DIRECT IO
+    BOOL check = DeviceIoControl(
+        hFile,
+        IOCTL_WRITE_WORKITEM,
+        0,
+        0,
+        buffer,
+        allocSize,
+        &retBytes,
+        0
+    );
+
+    if (check) {
+        YaraScanProcessTxtBox->Clear();
+        YaraScanProcessTxtBox->AppendText(wxString("Started scan successfully."));
+    }
+    else {
+        YaraScanProcessTxtBox->Clear();
+        YaraScanProcessTxtBox->AppendText(wxString("Unable to start scan."));
+    }
+
+    evt.Skip();
+    return;
+
 }

@@ -58,9 +58,7 @@ typedef struct REGIONINFO
 } RegionInfo, * PRegionInfo;
 
 struct YaraScanProcessAlert : Header {
-	RegionInfo regionInfo;
-	ULONG FilePathOffset;
-	ULONG FilePathLength;
+	ULONG processId;
 	ULONG MatchedRulesOffset;
 	ULONG MatchedRuleCount;
 };
