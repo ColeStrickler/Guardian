@@ -4,13 +4,15 @@
 #pragma warning(disable: 4996)
 
 
-
+// OUR FUNCTIONS
 DRIVER_UNLOAD Unload;
 DRIVER_DISPATCH CreateClose, Read, Write, IoControl;
 void OnProcessNotify(PEPROCESS Process, HANDLE ProcessId, PPS_CREATE_NOTIFY_INFO CreateInfo);
 void OnThreadNotify(HANDLE ProcessId, HANDLE ThreadId, BOOLEAN Create);
 void OnImageLoadNotify(PUNICODE_STRING FullImageName, HANDLE ProcessId, PIMAGE_INFO ImageInfo);
 
+// SYSTEM FUNCTIONS
+static QUERY_INFO_PROCESS ZwQueryInformationProcess;
 
 
 struct Globals {
@@ -25,17 +27,17 @@ struct Globals {
 	FastMutex BlockedPathsMutex;
 
 	// SERVICE WORK ITEMS SLL
-	LIST_ENTRY ServiceWorkItemsHead{ 0 };
-	int ServiceWorkItemsCount{ 0 };
+	LIST_ENTRY ServiceWorkItemsHead{0};
+	int ServiceWorkItemsCount{0};
 	FastMutex ServiceWorkItemsMutex;
 	
 	// OTHER GLOBAL CONFIG
-	RTL_OSVERSIONINFOW versionInfo{ 0 };
-	ConfigFiles ConfigurationFiles{ 0 };
-
+	RTL_OSVERSIONINFOW versionInfo{0};
+	ULONGLONG ServicePID{0};
+	PVOID ServiceRegHandle{0};
+	HANDLE MainThreadHandle{0};
+	bool CloseMainThreadSwitch{0};
 };
-
-
 Globals g_Struct;
 
 
@@ -177,15 +179,63 @@ NTSTATUS InitBlockedExecutionPaths() {
 }
 
 
+
+OB_PREOP_CALLBACK_STATUS PreOpenServiceProcess(PVOID, POB_PRE_OPERATION_INFORMATION Info) {
+	return OB_PREOP_SUCCESS;
+}
+
+
+void mainThread() {
+	while (true) {
+		
+		LARGE_INTEGER WaitTime;
+		WaitTime.QuadPart = TIME_RELATIVE(TIME_SECONDS(1));
+		KeDelayExecutionThread(KernelMode, FALSE, &WaitTime);
+
+		if (g_Struct.CloseMainThreadSwitch) {
+			break;
+		}
+	}
+	PsTerminateSystemThread(STATUS_SUCCESS);
+}
+
+
 extern "C" NTSTATUS
 DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING) {
 	auto status = STATUS_SUCCESS;
 	
+
 	PDEVICE_OBJECT DeviceObject = nullptr;
 	UNICODE_STRING symLink = RTL_CONSTANT_STRING(L"\\??\\guardian");
 	UNICODE_STRING devName = RTL_CONSTANT_STRING(L"\\device\\guardian");
 	bool symLinkCreated = false; 
 	bool processCallbacks = false, threadCallbacks = false, imageLoadCallbacks = false;
+
+	// STORE ALL OF OUR OBJECT OPERATION CALLBACK FUNCTIONS HERE
+	OB_OPERATION_REGISTRATION callbackOperations[] = {
+		{
+			PsProcessType,
+			OB_OPERATION_HANDLE_CREATE | OB_OPERATION_HANDLE_DUPLICATE,
+			PreOpenServiceProcess,
+		}
+	};
+
+	OB_CALLBACK_REGISTRATION registration = {
+		OB_FLT_REGISTRATION_VERSION,
+		sizeof(callbackOperations) / sizeof(OB_OPERATION_REGISTRATION),			// OPERATION COUNT
+		RTL_CONSTANT_STRING(L"12345.6789"),										// ALTITUDE
+		nullptr,																// CONTEXT
+		callbackOperations														// CALLBACK OPERATIONS ARRAY
+	};
+
+	// WE WILL DYNAMICALLY RESOLVE SYSTEM FUNCTIONS HERE
+	UNICODE_STRING routineName;
+	RtlInitUnicodeString(&routineName, L"ZwQueryInformationProcess");
+	ZwQueryInformationProcess = reinterpret_cast<QUERY_INFO_PROCESS>(MmGetSystemRoutineAddress(&routineName));
+	if (ZwQueryInformationProcess == NULL) {
+		KdPrint(("Cannot resolve address for ZwQueryInformationProcess"));
+		return STATUS_UNSUCCESSFUL;
+	}
 
 	InitializeListHead(&g_Struct.AlertsHead);
 	InitializeListHead(&g_Struct.BlockedPathsHead);
@@ -211,6 +261,19 @@ DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING) {
 			break;
 		}
 		symLinkCreated = true;
+
+
+		status = PsCreateSystemThread(&g_Struct.MainThreadHandle, THREAD_ALL_ACCESS, NULL, NULL, NULL, (PKSTART_ROUTINE)mainThread, NULL);
+		if (!NT_SUCCESS(status)) {
+			KdPrint((DRIVER_PREFIX "failed to create MainThread()\n", status));
+
+		}
+
+		status = ObRegisterCallbacks(&registration, &g_Struct.ServiceRegHandle);
+		if (!NT_SUCCESS(status)) {
+			KdPrint((DRIVER_PREFIX "failed to register object callbacks (0x%08X)\n", status));
+				
+		}
 
 
 		status = InitBlockedExecutionPaths();
@@ -324,6 +387,18 @@ void Unload(PDRIVER_OBJECT DriverObject) {
 	UNICODE_STRING symLink = RTL_CONSTANT_STRING(L"\\??\\guardian");
 	IoDeleteSymbolicLink(&symLink);
 	IoDeleteDevice(DriverObject->DeviceObject);
+	ObUnRegisterCallbacks(g_Struct.ServiceRegHandle);
+
+
+	if (g_Struct.MainThreadHandle) {
+		g_Struct.CloseMainThreadSwitch = TRUE;
+		PETHREAD threadObject;
+		ObReferenceObjectByHandle(g_Struct.MainThreadHandle, THREAD_ALL_ACCESS, *PsThreadType, KernelMode, (PVOID*)&threadObject, NULL);
+		KeWaitForSingleObject(threadObject, Executive, KernelMode, TRUE, nullptr);
+		KdPrint(("MainThread() ended.. Closing handle!\n"));
+		ZwClose(g_Struct.MainThreadHandle);
+	}
+
 
 	while (!IsListEmpty(&g_Struct.AlertsHead)) {
 		auto entry = RemoveHeadList(&g_Struct.AlertsHead);
@@ -381,7 +456,7 @@ void Unload(PDRIVER_OBJECT DriverObject) {
 			}
 		}
 	}
-
+	KdPrint(("[UNLOADED]\n"));
 }
 
 
@@ -449,6 +524,18 @@ void OnProcessNotify(PEPROCESS Process, HANDLE ProcessId, PPS_CREATE_NOTIFY_INFO
 		if (CreateInfo->FileOpenNameAvailable) {
 			KdPrint(("###############################\n"));
 			KdPrint(("IMAGE FILE NAME: %wZ\n", CreateInfo->ImageFileName));
+			
+			if (g_Struct.ServicePID == 0) {
+				KdPrint(("Checking to initialize ServicePID\n"));
+				UNICODE_STRING serviceProcName = RTL_CONSTANT_STRING(SERVICE_PROCIMAGE_NAME);
+
+				if (!RtlCompareUnicodeString(&serviceProcName, CreateInfo->ImageFileName, TRUE)) {
+					KdPrint(("GOT SERVICE PID!"));
+					g_Struct.ServicePID = (ULONGLONG)ProcessId;
+					return;
+				}
+			}
+			
 			if (CheckBlockedPath(g_Struct.BlockedPathsHead.Flink, CreateInfo->ImageFileName)) {
 
 				USHORT ImageNameLength = 0;
@@ -870,5 +957,8 @@ NTSTATUS IoControl(PDEVICE_OBJECT, PIRP Irp) {
 
 
 void OnImageLoadNotify(PUNICODE_STRING FullImageName, HANDLE ProcessId, PIMAGE_INFO ImageInfo) {
+
+	 
+
 	return;
 }

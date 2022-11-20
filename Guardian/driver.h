@@ -8,22 +8,31 @@
 
 
 #define DRIVER_PREFIX "GUARDIAN: "
+#define PROCESS_TERMINATE 1
 
 
-typedef NTSTATUS(*QUERY_INFO_PROCESS) (
-	__in HANDLE ProcessHandle,
-	__in PROCESSINFOCLASS ProcessInformationClass,
-	__out_bcount(ProcessInformationLength) PVOID ProcessInformation,
-	__in ULONG ProcessInformationLength,
-	__out_opt PULONG ReturnLength
+#define TIME_ABSOLUTE(wait) (wait)
+#define TIME_RELATIVE(wait) (-(wait))
+#define TIME_NANOSECONDS(nanos) (((signed __int64)(nanos)) / 100L)
+#define TIME_MICROSECONDS(micros) (((signed __int64)(micros)) * TIME_NANOSECONDS(1000L))
+#define TIME_MILLISECONDS(milli) (((signed __int64)(milli)) * TIME_MICROSECONDS(1000L))
+#define TIME_SECONDS(seconds) (((signed __int64)(seconds)) * TIME_MILLISECONDS(1000L))
+
+
+typedef NTSTATUS(*QUERY_INFO_PROCESS)(
+	__in HANDLE                                      ProcessHandle,
+	__in PROCESSINFOCLASS                            ProcessInformationClass,
+	__out_bcount_opt(ProcessInformationLength) PVOID ProcessInformation,
+	__in UINT32                                      ProcessInformationLength,
+	__out_opt PUINT32                                ReturnLength
 	);
 
-QUERY_INFO_PROCESS ZwQueryInformationProcess;
 
 
-struct ConfigFiles {
-	wchar_t* BlockedPathConfigFile = BLOCKED_PATH_CONFIG;
-};
+
+
+
+
 
 
 struct BlockedPathNode {

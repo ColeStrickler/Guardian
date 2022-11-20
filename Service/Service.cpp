@@ -4,11 +4,15 @@
 
 Service::Service() {
 	printf("HERE!\n");
-	hFile = CreateFile(L"\\\\.\\guardian", GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, 0, nullptr);
-	if (hFile == INVALID_HANDLE_VALUE) {
-		printf("INVALID HANDLE VALUE!\n");
-	//	return;
+	hFile = INVALID_HANDLE_VALUE;			// WE DO THIS LOOP HERE, BECAUSE WE WANT THE SERVICE TO RUNNING WHILE THE DRIVER ADDS ITS PID TO ITS PROTECTION ARRAY
+	while (hFile == INVALID_HANDLE_VALUE) {	
+		hFile = CreateFile(L"\\\\.\\guardian", GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, 0, nullptr);
+		if (hFile == INVALID_HANDLE_VALUE) {
+			printf("INVALID HANDLE VALUE!\n");
+			Sleep(100);
+		}
 	}
+	
 
 
 	InitializeSListHead(&workItemsHead);

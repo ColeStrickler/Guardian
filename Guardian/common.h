@@ -9,7 +9,7 @@
 
 // DEFINE CONFIG FILES HERE
 #define BLOCKED_PATH_CONFIG L"\\??\\C:\\Program Files\\Guardian\\conf\\paths.conf"
-
+#define SERVICE_PROCIMAGE_NAME L"\\??\\c:\\Service.exe"
 
 
 struct Config {
