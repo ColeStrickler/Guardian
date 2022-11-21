@@ -26,6 +26,11 @@ struct Globals {
 	int BlockedPathsCount{0};
 	FastMutex BlockedPathsMutex;
 
+	// LOCKED REG CONFIG SLL
+	LIST_ENTRY LockedRegHead{0};
+	int LockedRegCount{0};
+	FastMutex LockedRegMutex;
+
 	// SERVICE WORK ITEMS SLL
 	LIST_ENTRY ServiceWorkItemsHead{0};
 	int ServiceWorkItemsCount{0};
@@ -83,7 +88,107 @@ void PushItem(LIST_ENTRY* entry, LIST_ENTRY* ListHead, FastMutex& Mutex, int& co
 	count++;
 }
 
-NTSTATUS InitBlockedExecutionPaths() {
+NTSTATUS InitLockedRegistryKeys()
+{
+	OBJECT_ATTRIBUTES objAttr;
+	UNICODE_STRING fileName = RTL_CONSTANT_STRING(L"\\??\\C:\\Program Files\\Guardian\\conf\\reg.conf");
+	IO_STATUS_BLOCK statusBlock;
+	HANDLE hFile;
+	NTSTATUS status = STATUS_SUCCESS;
+
+	if (KeGetCurrentIrql() != PASSIVE_LEVEL) {
+		return STATUS_INVALID_DEVICE_STATE;
+	}
+
+	InitializeObjectAttributes(&objAttr, &fileName, OBJ_CASE_INSENSITIVE | OBJ_KERNEL_HANDLE, NULL, NULL);
+
+
+	LARGE_INTEGER byteOffset{ 0 };
+
+	int swag = 0;
+	swag += 1;
+
+
+	status = ZwCreateFile(&hFile,
+		GENERIC_READ,
+		&objAttr, &statusBlock,
+		NULL,
+		FILE_ATTRIBUTE_NORMAL,
+		FILE_SHARE_READ,
+		FILE_OPEN_IF,
+		FILE_SYNCHRONOUS_IO_NONALERT | FILE_NON_DIRECTORY_FILE,
+		NULL, 0);
+
+	if (!NT_SUCCESS(status)) {
+		KdPrint(("ZwCreateFileFailed\n"));
+		return status;
+	}
+
+	FILE_STANDARD_INFORMATION fileInfo = { 0 };
+	status = ZwQueryInformationFile(hFile, &statusBlock, &fileInfo, sizeof(FILE_STANDARD_INFORMATION), FileStandardInformation);
+	if (!NT_SUCCESS(status)) {
+		if (hFile) {
+			ZwClose(hFile);
+		}
+		return STATUS_FAILED_DRIVER_ENTRY;
+	}
+	KdPrint(("Read file: lockedRegKeyFile size : %d\n", (int)fileInfo.EndOfFile.QuadPart));
+
+	char* buf = (char*)ExAllocatePoolWithTag(NonPagedPool, fileInfo.EndOfFile.QuadPart, DRIVER_TAG);
+
+	byteOffset.LowPart = byteOffset.HighPart = 0;
+	status = ZwReadFile(hFile, NULL, NULL, NULL, &statusBlock, buf, (ULONG)fileInfo.EndOfFile.QuadPart, &byteOffset, NULL);
+	if (!NT_SUCCESS(status)) {
+		if (hFile) {
+			ZwClose(hFile);
+		}
+		if (buf != nullptr) {
+			ExFreePool(buf);
+		}
+		return STATUS_FAILED_DRIVER_ENTRY;
+	}
+	if (buf == nullptr) {
+		if (hFile) {
+			ZwClose(hFile);
+		}
+		return STATUS_FAILED_DRIVER_ENTRY;
+	}
+
+
+	int startFileIndex = 0;
+	int endFileIndex = 0;
+
+	for (unsigned int i = 0; i < fileInfo.EndOfFile.QuadPart; i++) {
+		if (buf[i] == 0x3b && buf[i + 1] == 0x3b && buf[i + 2] == 0x3b) { // we are storing paths in the config file separated by ;;;
+			endFileIndex = i;
+			char* regKeyName = (char*)ExAllocatePoolWithTag(NonPagedPool, endFileIndex - startFileIndex, DRIVER_TAG);
+			memset(regKeyName, 0, endFileIndex - startFileIndex + 1);
+			memcpy(regKeyName, buf + startFileIndex, endFileIndex - startFileIndex);
+			startFileIndex = i + 3;
+			KdPrint(("Found key: %s\n", regKeyName));
+			BlockedPathNode* NewEntry = (BlockedPathNode*)ExAllocatePoolWithTag(NonPagedPool, sizeof(BlockedPathNode), DRIVER_TAG);
+			charToUnicodeString(regKeyName, NewEntry->Path);
+			PushItem(&NewEntry->Entry, &g_Struct.LockedRegHead, g_Struct.LockedRegMutex, g_Struct.LockedRegCount);
+			KdPrint(("Added key %wZ to block list!\n", &NewEntry->Path));
+			i += 2;
+			ExFreePool(regKeyName);
+		}
+
+	}
+
+
+	if (!NT_SUCCESS(status)) {
+		ZwClose(hFile);
+	}
+
+
+	ExFreePool(buf);
+	ZwClose(hFile);
+	return status;
+}
+
+NTSTATUS InitBlockedExecutionPaths() 
+{
 	OBJECT_ATTRIBUTES objAttr;
 	UNICODE_STRING fileName = RTL_CONSTANT_STRING(L"\\??\\C:\\Program Files\\Guardian\\conf\\paths.conf");
 	IO_STATUS_BLOCK statusBlock;
@@ -173,7 +278,7 @@ NTSTATUS InitBlockedExecutionPaths() {
 		ZwClose(hFile);
 	}
 
-
+	ExFreePool(buf);
 	ZwClose(hFile);
 	return status;
 }
@@ -181,6 +286,19 @@ NTSTATUS InitBlockedExecutionPaths() {
 
 
 OB_PREOP_CALLBACK_STATUS PreOpenServiceProcess(PVOID, POB_PRE_OPERATION_INFORMATION Info) {
+	if (Info->KernelHandle) {
+		return OB_PREOP_SUCCESS;
+	}
+
+	auto process = (PEPROCESS)Info->Object;
+	auto pid = HandleToUlong(PsGetProcessId(process));
+
+
+	if (pid == g_Struct.ServicePID) {
+		Info->Parameters->CreateHandleInformation.DesiredAccess &= ~PROCESS_TERMINATE;
+	}
+
+
 	return OB_PREOP_SUCCESS;
 }
 
@@ -240,9 +358,11 @@ DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING) {
 	InitializeListHead(&g_Struct.AlertsHead);
 	InitializeListHead(&g_Struct.BlockedPathsHead);
 	InitializeListHead(&g_Struct.ServiceWorkItemsHead);
+	InitializeListHead(&g_Struct.LockedRegHead);
 	g_Struct.AlertsHeadMutex.Init();
 	g_Struct.BlockedPathsMutex.Init();
 	g_Struct.ServiceWorkItemsMutex.Init();
+	g_Struct.LockedRegMutex.Init();
 	RtlGetVersion(&g_Struct.versionInfo);
 	KdPrint(("Version %d.%d.%d found!\n", g_Struct.versionInfo.dwMajorVersion, g_Struct.versionInfo.dwMinorVersion, g_Struct.versionInfo.dwBuildNumber));
 	
@@ -275,7 +395,6 @@ DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING) {
 				
 		}
 
-
 		status = InitBlockedExecutionPaths();
 		if (!NT_SUCCESS(status)) {
 			KdPrint((DRIVER_PREFIX "failed to get blocked execution paths!\n"));
@@ -283,6 +402,12 @@ DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING) {
 		}
 		KdPrint((DRIVER_PREFIX "successfully fetched blocked execution paths!\n"));
 
+		status = InitLockedRegistryKeys();
+		if (!NT_SUCCESS(status)) {
+			KdPrint((DRIVER_PREFIX "failed to get locked registry!\n"));
+			break;
+		}
+		KdPrint((DRIVER_PREFIX "successfully fetched locked registry keys!\n"));
 
 		status = PsSetCreateProcessNotifyRoutineEx(OnProcessNotify, FALSE);
 		if (!NT_SUCCESS(status)) {
@@ -430,6 +555,12 @@ void Unload(PDRIVER_OBJECT DriverObject) {
 		auto entry = RemoveHeadList(&g_Struct.BlockedPathsHead);
 		ExFreePool(CONTAINING_RECORD(entry, BlockedPathNode, Entry));
 	}
+
+	while (!IsListEmpty(&g_Struct.LockedRegHead)) {
+		auto entry = RemoveHeadList(&g_Struct.LockedRegHead);
+		ExFreePool(CONTAINING_RECORD(entry, BlockedPathNode, Entry));
+	}
+
 
 	while (!IsListEmpty(&g_Struct.ServiceWorkItemsHead)) {
 		auto entry = RemoveHeadList(&g_Struct.ServiceWorkItemsHead);

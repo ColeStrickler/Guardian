@@ -70,10 +70,10 @@ std::string WstringToString(std::wstring wstr) {
 }
 
 int main() {
-
-    std::wstring swag(L"C:\\Users\\IEUser\\Desktop\\dbgview64.exe");
-
-    std::string out = WstringToString(swag);
-    std::cout << "string: " << out << std::endl;
+    HKEY hReg;
+    LSTATUS status = RegOpenKeyW(HKEY_CURRENT_USER, TEXT("SOFTWARE\\Guardian"), &hReg);
+    if (status != ERROR_SUCCESS) {
+        printf("ERROR: %d\n",  GetLastError());
+    }
 }
 

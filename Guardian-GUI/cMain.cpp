@@ -6,7 +6,7 @@ wxBEGIN_EVENT_TABLE(cMain, wxFrame)
 EVT_BUTTON(10001, AddBlockedFilePathBtnFunc)
 EVT_BUTTON(10002, YaraScanFile)
 EVT_BUTTON(10003, YaraScanProcess)
-
+EVT_BUTTON(10004, AddLockedRegistryKey)
 
 wxEND_EVENT_TABLE()
 
@@ -292,9 +292,15 @@ cMain::cMain() : wxFrame(nullptr, wxID_ANY, "Guardian", wxPoint(30, 30), wxSize(
     YaraScanProcessBtn = new wxButton(this, 10003, "Yara scan PID", wxPoint(10, 60), wxSize(200, 20));
     YaraScanProcessTxtBox = new wxTextCtrl(this, wxID_ANY, "<process id>", wxPoint(210, 60), wxSize(200, 20));
 
+    // LOCK REGISTRY KEY BUTTON
+    AddBlockedRegistryKeyBtn = new wxButton(this, 10004, "Add Blocked Registry Key", wxPoint(10, 80), wxSize(200, 20));
+    AddBlockedRegistryKeyTxtBox = new wxTextCtrl(this, wxID_ANY, "<registry key>", wxPoint(210, 80), wxSize(200, 20));
+
     // EVENT/ALERT FEED
 	AlertFeed = new wxListBox(this, wxID_ANY, wxPoint(10, 210), wxSize(500, 400));
     hEventThread = CreateThread(0, 0, reinterpret_cast<LPTHREAD_START_ROUTINE>(displayEventThread), this, 0, 0);
+
+   
 
 
     // SCAN RESULTS TEXT BOX
@@ -306,6 +312,7 @@ cMain::cMain() : wxFrame(nullptr, wxID_ANY, "Guardian", wxPoint(30, 30), wxSize(
 cMain::~cMain() {
     CloseHandle(hFile);
 }
+
 
 int checkExistingBlockedFilePath(HANDLE HandleBlockedPathConfigFile, std::string FilePath, std::string& outString) 
 {
@@ -461,6 +468,194 @@ void cMain::AddBlockedFilePathBtnFunc(wxCommandEvent& evt)
     }
 	evt.Skip(); // call this to end the event
     return;
+}
+
+
+bool cMain::CheckValidRegistryKey(std::wstring RegKey) 
+{
+    wchar_t* stringData = RegKey.data();
+    RAII::NewBuffer buffer(RegKey.size() * 2);
+    BYTE* buf = buffer.Get();
+    HKEY hk;
+    LSTATUS status;
+
+    
+
+    if (stringData[5] == L'L') {             // HKEY_LOCAL_MACHINE
+
+        memcpy(buf, RegKey.data() + 19, RegKey.size() * 2 - 19);
+        status = RegOpenKeyExW(HKEY_LOCAL_MACHINE, (LPWSTR)buf, 0, KEY_READ | KEY_WOW64_64KEY, &hk);
+        if (status != ERROR_SUCCESS) {
+            return false;
+        }
+        return true;
+
+    }
+    else if (stringData[5] == L'U') {        // HKEY_USERS
+
+        memcpy(buf, RegKey.data() + 11, RegKey.size() * 2 - 11);
+        status = RegOpenKeyExW(HKEY_USERS, (LPWSTR)buf, 0, KEY_READ| KEY_WOW64_64KEY, &hk);
+        if (status != ERROR_SUCCESS) {
+            return false;
+        }
+        return true;
+
+    }
+    else if (stringData[5] == L'C') {         
+
+        if (stringData[6] == L'L') {          // HKEY_CLASSES_ROOT
+
+            memcpy(buf, RegKey.data() + 18, RegKey.size() * 2 - 18);
+            status = RegOpenKeyExW(HKEY_CLASSES_ROOT, (LPWSTR)buf, 0, KEY_READ | KEY_WOW64_64KEY, &hk);
+            if (status != ERROR_SUCCESS) {
+                return false;
+            }
+            return true;
+
+        }
+        else if (stringData[13] == 'C') {   // HKEY_CURRENT_CONFIG
+
+            memcpy(buf, RegKey.data() + 20, RegKey.size() * 2 - 20);
+            status = RegOpenKeyExW(HKEY_CURRENT_CONFIG, (LPWSTR)buf, 0, KEY_READ | KEY_WOW64_64KEY, &hk);
+            if (status != ERROR_SUCCESS) {
+                return false;
+            }
+            return true;
+
+        }
+        else if (stringData[13] == 'U') {   // HKEY_CURRENT_USER
+
+            memcpy(buf, RegKey.data() + 18, RegKey.size() * 2 - 18);
+            status = RegOpenKeyExW(HKEY_CURRENT_USER, (LPWSTR)buf, 0, KEY_READ | KEY_WOW64_64KEY, &hk);
+            if (status != ERROR_SUCCESS) {
+                return false;
+            }
+            return true;
+
+        }
+
+        return false;
+    }
+    else {
+        return false;
+    }
+}
+
+
+bool cMain::CheckExistingRegistryKey(HANDLE HandleLockedRegistryKeyConfigFile, std::string RegKey)
+{
+    DWORD size{ 0 };
+    size = GetFileSize(HandleLockedRegistryKeyConfigFile, 0);
+    BYTE* configFile = RAII::NewBuffer(size).Get();
+    if (configFile == nullptr) {
+        MessageBoxA(NULL, "Could not allocate heap memory for file read.", "Error", MB_ICONERROR | MB_DEFBUTTON1);
+        return false;
+    }
+
+    DWORD read;
+    bool check = ReadFile(HandleLockedRegistryKeyConfigFile, configFile, size, &read, NULL);
+    if (!check) {
+        MessageBoxA(NULL, "Could not read from configuration file.", "Error", MB_ICONERROR | MB_DEFBUTTON1);
+        return 3;
+    }
+
+    int relIndex = 0;
+    bool match = true;
+    const char* filePathchars = RegKey.c_str();
+    for (unsigned int i = 0; i < size; i++) {
+
+        if (configFile[i] == 0x3b && configFile[i + 1] == 0x3b && configFile[i + 2] == 0x3b) {
+            if (match == true) {
+                return true;
+            }
+            i += 2;
+            relIndex = 0;
+            match = true;
+            continue;
+        }
+
+        if (filePathchars[relIndex] != configFile[i]) {
+            match = false;
+        }
+        relIndex++;
+    }
+
+    return false;
+}
+
+
+void cMain::AddLockedRegistryKey(wxCommandEvent& evt)
+{
+    std::wstring RegKey = std::wstring(AddBlockedRegistryKeyTxtBox->GetValue().c_str());
+    std::string RegKeyS = std::string(AddBlockedRegistryKeyTxtBox->GetValue().mb_str());
+    if (!CheckValidRegistryKey(RegKey)) {
+        char buf[200];
+        sprintf_s(buf, "Registry Key does not exist. Error code: %d", GetLastError());
+        MessageBoxA(NULL, buf, "Error", MB_ICONERROR | MB_DEFBUTTON1);
+        evt.Skip();
+        return;
+    }
+
+    RAII::Handle hConfig = CreateFileW(LockedRegistryPathConfig, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (hConfig.Get() == INVALID_HANDLE_VALUE) {
+        MessageBoxA(NULL, "Could not open config file for write.", "Error", MB_ICONERROR | MB_DEFBUTTON1);
+        evt.Skip();
+        return;
+    }
+
+    if (CheckExistingRegistryKey(hConfig.Get(), RegKeyS)) {         // Key exists
+        MessageBoxA(NULL, "Registry key is already locked.", "Error", MB_ICONERROR | MB_DEFBUTTON1);
+        evt.Skip();
+        return;
+    }
+    
+    // close our original handle, because now we must use CreateFileWith the append flag
+    hConfig.Close();
+    RAII::Handle hConfig2 = CreateFileW(LockedRegistryPathConfig, FILE_APPEND_DATA, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (hConfig2.Get() == INVALID_HANDLE_VALUE) {
+        MessageBoxA(NULL, "Unable to obtain handle to write config file.", "Error", MB_ICONERROR | MB_DEFBUTTON1);
+        evt.Skip();
+        return;
+    }
+
+    DWORD size = RegKeyS.length() + 3; // size of user given path + ;;;
+    BYTE* writeBuffer = RAII::NewBuffer(size).Get();
+    memcpy(writeBuffer, RegKeyS.c_str(), size - 3);
+    memset((void*)((uintptr_t)writeBuffer + RegKeyS.length()), 0x3b, 3); // set last 3 bytes to ;;;
+
+    DWORD numWritten;
+    BOOL writeSuccess = false;
+    writeSuccess = WriteFile(hConfig2.Get(), writeBuffer, size, &numWritten, NULL);
+    if (!writeSuccess) {
+        MessageBoxA(NULL, "Unable to write file path to current configuration.", "Error", MB_ICONERROR | MB_DEFBUTTON1);
+        evt.Skip();
+        return;
+    }
+
+    ULONG64 outBuffer;
+    DWORD retBytes;
+    BOOL success = DeviceIoControl(
+        hFile,
+        IOCTL_LOCKDOWN_REGKEY,
+        writeBuffer,
+        size,
+        &outBuffer,
+        sizeof(ULONG64),
+        &retBytes,
+        nullptr         // lpOverlapped
+    );
+    if (!success) {
+        MessageBoxA(NULL, "Blocked file path added to configuration file, but not added to current Guardian session.", "Error", MB_ICONERROR | MB_DEFBUTTON1);
+    }
+    else {
+        wxString successText("OK!");
+        AddBlockedFileTxtBox->Clear();
+        AddBlockedFileTxtBox->AppendText(successText);
+    }
+    evt.Skip(); // call this to end the event
+    return;
+
+
 }
 
 

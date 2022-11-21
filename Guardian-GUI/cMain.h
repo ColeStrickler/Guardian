@@ -49,6 +49,12 @@ public:
 	wxTextCtrl* YaraScanProcessTxtBox = nullptr;
 	int YaraScanProcessTxtBoxId = 9;
 
+	wxButton* AddBlockedRegistryKeyBtn = nullptr;
+	int AddBlockedRegistryKeyBtnId = 10;
+
+	wxTextCtrl* AddBlockedRegistryKeyTxtBox = nullptr;
+	int AddBlockedRegistryKeyTxtBoxId = 11;
+
 	wxGauge* m_statBar1 = nullptr;						// WE WILL USE THIS LATER TO GAUGE SCAN PROGRESS
 
 	// must include this macro for events
@@ -66,6 +72,7 @@ public:
 // PUBLIC FUNCTIONS
 public:
 	void AddBlockedFilePathBtnFunc(wxCommandEvent& evt);
+	void AddLockedRegistryKey(wxCommandEvent& evt);
 	void YaraScanFile(wxCommandEvent& evt);
 	void YaraScanProcess(wxCommandEvent& evt);
 	void DisplayInfo(BYTE* buffer, DWORD size);
@@ -77,6 +84,8 @@ private:
 	static void displayEventThread(cMain* main);
 	void initUserArray(std::vector<std::wstring> users);
 	bool CheckValidUser();
+	bool CheckValidRegistryKey(std::wstring RegKey);
+	bool CheckExistingRegistryKey(HANDLE HandleLockedPathConfigFile, std::string RegKey);
 	void PrintYaraScanFile(std::vector<std::string> matchedRules, std::string FilePath);
 	void PrintYaraScanProcess(std::vector<std::string> matchedRules, std::string ProcName, DWORD processId);
 
@@ -84,5 +93,6 @@ private:
 // PRIVATE VARIABLES
 private: 
 	const wchar_t* BlockedFilePathConfig = L"C:\\Program Files\\Guardian\\conf\\paths.conf";
+	const wchar_t* LockedRegistryPathConfig = L"C:\\Program Files\\Guardian\\conf\\reg.conf";
 };
 
