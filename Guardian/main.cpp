@@ -823,7 +823,6 @@ NTSTATUS IoControl(PDEVICE_OBJECT, PIRP Irp) {
 		KdPrint(("NEW BLOCKED PATH --> %wZ", NewBlockedPathNode->Path));
 		if (NewBlockedPathNode->Path.Length != 0) {
 			KdPrint(("Successfully added user given path to new entry!\n"));
-			ExFreePool(NewBlockedPathNode);
 			PushItem(&NewBlockedPathNode->Entry, &g_Struct.BlockedPathsHead, g_Struct.BlockedPathsMutex, g_Struct.BlockedPathsCount);
 		}
 		else {
@@ -833,6 +832,49 @@ NTSTATUS IoControl(PDEVICE_OBJECT, PIRP Irp) {
 			break;
 		}
 		break;
+	}
+
+	case IOCTL_LOCKDOWN_REGKEY:
+	{
+		auto len = stack->Parameters.DeviceIoControl.InputBufferLength;
+		if (len <= 0) { // check key size
+			status = STATUS_INVALID_PARAMETER;
+			break;
+		}
+		unsigned char* inBuffer = (unsigned char*)stack->Parameters.DeviceIoControl.Type3InputBuffer;
+		bool foundDelimeter = false;
+		for (unsigned short i = 0; i < len; i++) { // This is just another sanity check, we go ahead and zero the ; to make it easier to add to our global linked list
+			if (inBuffer[i] == 0x3b) {
+				inBuffer[i] = 0x00;
+				foundDelimeter = true;
+			}
+		}
+
+		if (!foundDelimeter) {
+			status = STATUS_INVALID_PARAMETER;
+			break;
+		}
+
+		auto NewBlockedPathNode = (BlockedPathNode*)ExAllocatePoolWithTag(NonPagedPool, sizeof(BlockedPathNode), DRIVER_TAG);
+		if (NewBlockedPathNode == nullptr) {
+			status = STATUS_INSUFFICIENT_RESOURCES;
+			break;
+		}
+
+		charToUnicodeString((char*)inBuffer, NewBlockedPathNode->Path);
+		KdPrint(("NEW BLOCKED PATH --> %wZ", NewBlockedPathNode->Path));
+		if (NewBlockedPathNode->Path.Length != 0) {
+			KdPrint(("Successfully added user given path to new entry!\n"));
+			PushItem(&NewBlockedPathNode->Entry, &g_Struct.LockedRegHead, g_Struct.LockedRegMutex, g_Struct.LockedRegCount);
+		}
+		else {
+			KdPrint(("Unable to add user given path to new entry!\n"));
+			status = STATUS_ABANDONED;
+			ExFreePool(NewBlockedPathNode);
+			break;
+		}
+		break;
+
 	}
 
 	// FROM HERE, THE GUI MANAGER WILL WRITE IN NEW WORK ITEMS
