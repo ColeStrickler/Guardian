@@ -584,6 +584,74 @@ bool cMain::CheckExistingRegistryKey(HANDLE HandleLockedRegistryKeyConfigFile, s
 }
 
 
+std::string cMain::UserRegistryToKernelRegistry(std::string UserRegistryKey)
+{
+    // REGISTRY TRANSLATIONS FROM USER MODE SPEAK TO DRIVER SPEAK
+    // HKEY_CLASSES_ROOT	-->		\REGISTRY\MACHINE\SOFTWARE\Classes\
+	// HKEY_CURRENT_USER	-->		\REGISTRY\USER\SID
+    // HKEY_LOCAL_MACHINE	-->		\REGISTRY\MACHINE\
+	// HKEY_USERS			-->		\REGISTRY\USER\
+	// HKEY_CURRENT_CONFIG  -->		\REGISTRY\MACHINE\SYSTEM\ControlSet001\Hardware Profiles\0001\
+
+    if (UserRegistryKey.data()[5] == 'C') {
+
+        if (UserRegistryKey.data()[6] == 'L') {                                                             // HKEY_CLASSES_ROOT
+            const char* prepath = "\\REGISTRY\\MACHINE\\SOFTWARE\\Classes\\";
+            std::string s1 = std::string(prepath);
+            std::string s2 = std::string(UserRegistryKey.data() + 18);
+            std::string ret = s1 + s2;
+            return ret;
+
+
+        }
+        else if (UserRegistryKey.data()[13] == 'C') {                                                      // HKEY_CURRENT_CONFIG
+            const char* prepath = "\\REGISTRY\\MACHINE\\SYSTEM\\ControlSet001\\Hardware Profiles\\0001\\";  
+            std::string s1 = std::string(prepath);
+            std::string s2 = std::string(UserRegistryKey.data() + 20);
+            std::string ret = s1 + s2;
+            return ret;
+
+        }
+        else if (UserRegistryKey.data()[13] == 'U') {                                                       // HKEY_CURRENT_USER
+            const char* prepath = "\\REGISTRY\\USER\\";  // need to add current sid after
+            std::string s1 = std::string(prepath);
+            std::string sid = GetCurrentSid();
+            s1 = s1 + sid;
+            std::string s2 = std::string(UserRegistryKey.data() + 18);
+            std::string ret = s1 + s2;
+            return ret;
+        }
+        else {
+            return UserRegistryKey;
+        }
+
+
+    }
+    else if (UserRegistryKey.data()[5] == 'L') {                                                            // HKEY_LOCAL_MACHINE
+        const char* prepath = "\\REGISTRY\\MACHINE\\";
+        std::string s1 = std::string(prepath);
+        std::string s2 = std::string(UserRegistryKey.data() + 19);
+        std::string ret = s1 + s2;
+        return ret;
+
+    }
+    else if (UserRegistryKey.data()[5] == 'U') {
+        const char* prepath = "\\REGISTRY\\USER\\";                                                         // HKEY_USERS   
+        std::string s1 = std::string(prepath);
+        std::string s2 = std::string(UserRegistryKey.data() + 11);
+        std::string ret = s1 + s2;
+        return ret;
+
+    }
+    else {
+        return UserRegistryKey;
+    }
+
+
+
+}
+
+
 void cMain::AddLockedRegistryKey(wxCommandEvent& evt)
 {
     std::wstring RegKey = std::wstring(AddBlockedRegistryKeyTxtBox->GetValue().c_str());
@@ -603,6 +671,9 @@ void cMain::AddLockedRegistryKey(wxCommandEvent& evt)
         return;
     }
 
+    RegKeyS = UserRegistryToKernelRegistry(RegKeyS);
+    MessageBoxA(NULL, RegKeyS.c_str(), "Error", MB_ICONERROR | MB_DEFBUTTON1);
+
     if (CheckExistingRegistryKey(hConfig.Get(), RegKeyS)) {         // Key exists
         MessageBoxA(NULL, "Registry key is already locked.", "Error", MB_ICONERROR | MB_DEFBUTTON1);
         evt.Skip();
@@ -617,6 +688,8 @@ void cMain::AddLockedRegistryKey(wxCommandEvent& evt)
         evt.Skip();
         return;
     }
+
+    
 
     DWORD size = RegKeyS.length() + 3; // size of user given path + ;;;
     BYTE* writeBuffer = RAII::NewBuffer(size).Get();

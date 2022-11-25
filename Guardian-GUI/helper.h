@@ -4,6 +4,7 @@
 #include <string>
 #include <cassert>
 #include <vector>
+#include <sddl.h>
 #include <TlHelp32.h>
 #include "RAII.h"
 
@@ -17,3 +18,4 @@ BOOL FileExists(LPCTSTR szPath);
 std::vector<std::wstring> listUsers();
 BOOL ProcIdExists(DWORD procId);
 std::string GetProcnameFromId(DWORD procId);
+std::string GetCurrentSid();

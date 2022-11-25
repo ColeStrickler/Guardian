@@ -10,6 +10,7 @@ DRIVER_DISPATCH CreateClose, Read, Write, IoControl;
 void OnProcessNotify(PEPROCESS Process, HANDLE ProcessId, PPS_CREATE_NOTIFY_INFO CreateInfo);
 void OnThreadNotify(HANDLE ProcessId, HANDLE ThreadId, BOOLEAN Create);
 void OnImageLoadNotify(PUNICODE_STRING FullImageName, HANDLE ProcessId, PIMAGE_INFO ImageInfo);
+NTSTATUS OnRegistryNotify(PVOID context, PVOID arg1, PVOID arg2);
 
 // SYSTEM FUNCTIONS
 static QUERY_INFO_PROCESS ZwQueryInformationProcess;
@@ -40,6 +41,7 @@ struct Globals {
 	RTL_OSVERSIONINFOW versionInfo{0};
 	ULONGLONG ServicePID{0};
 	PVOID ServiceRegHandle{0};
+	LARGE_INTEGER RegCookie;
 	HANDLE MainThreadHandle{0};
 	bool CloseMainThreadSwitch{0};
 };
@@ -409,6 +411,13 @@ DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING) {
 		}
 		KdPrint((DRIVER_PREFIX "successfully fetched locked registry keys!\n"));
 
+		UNICODE_STRING altitude = RTL_CONSTANT_STRING(L"12345.6789");
+		status = CmRegisterCallbackEx(OnRegistryNotify, &altitude, DriverObject, nullptr, &g_Struct.RegCookie, nullptr);
+		if (!NT_SUCCESS(status)) {
+			KdPrint((DRIVER_PREFIX "failed to register for registry notifications!\n"));
+			break;
+		}
+
 		status = PsSetCreateProcessNotifyRoutineEx(OnProcessNotify, FALSE);
 		if (!NT_SUCCESS(status)) {
 			KdPrint((DRIVER_PREFIX "failed to register process callback (0x%08X)\n", status));
@@ -513,7 +522,7 @@ void Unload(PDRIVER_OBJECT DriverObject) {
 	IoDeleteSymbolicLink(&symLink);
 	IoDeleteDevice(DriverObject->DeviceObject);
 	ObUnRegisterCallbacks(g_Struct.ServiceRegHandle);
-
+	CmUnRegisterCallback(g_Struct.RegCookie);
 
 	if (g_Struct.MainThreadHandle) {
 		g_Struct.CloseMainThreadSwitch = TRUE;
@@ -1129,9 +1138,93 @@ NTSTATUS IoControl(PDEVICE_OBJECT, PIRP Irp) {
 }
 
 
-void OnImageLoadNotify(PUNICODE_STRING FullImageName, HANDLE ProcessId, PIMAGE_INFO ImageInfo) {
+void OnImageLoadNotify(PUNICODE_STRING FullImageName, HANDLE ProcessId, PIMAGE_INFO ImageInfo)
+{
 
 	 
 
 	return;
 }
+
+// RETURN TRUE IF A MATCH IS FOUND
+bool CheckLockedRegistryKey(LIST_ENTRY* LockedKeysListHead, PCUNICODE_STRING KeyName) {
+	AutoLock<FastMutex> lock(g_Struct.LockedRegMutex);
+	if (IsListEmpty(&g_Struct.LockedRegHead)) {
+		return false;
+	}
+
+
+	BlockedPathNode* entry = CONTAINING_RECORD(LockedKeysListHead, BlockedPathNode, Entry);
+	BlockedPathNode* head = entry;
+	
+	if (!RtlCompareUnicodeString(&head->Path, KeyName, TRUE)) {
+		return true;
+	}
+	
+	BlockedPathNode* curr = CONTAINING_RECORD(head->Entry.Flink, BlockedPathNode, Entry);
+	while ((uintptr_t)curr != (uintptr_t)&g_Struct.LockedRegHead) {
+		KdPrint(("Checking if %ws is blocked by rule --> %ws\n", KeyName->Buffer, curr->Path.Buffer));
+		if (!RtlCompareUnicodeString(&curr->Path, KeyName, TRUE)) {
+			return true;
+		}
+
+		curr = CONTAINING_RECORD(curr->Entry.Flink, BlockedPathNode, Entry);
+	}
+
+	return false;
+}
+
+
+NTSTATUS OnRegistryNotify(PVOID context, PVOID arg1, PVOID arg2)
+{
+	UNREFERENCED_PARAMETER(context);
+	NTSTATUS status = STATUS_SUCCESS;
+
+
+	// REGISTRY TRANSLATIONS FROM USER MODE SPEAK TO DRIVER SPEAK
+	// HKEY_CLASSES_ROOT	-->		\REGISTRY\MACHINE\SOFTWARE\Classes\
+	// HKEY_CURRENT_USER	-->		\REGISTRY\USER\SID
+	// HKEY_LOCAL_MACHINE	-->		\REGISTRY\MACHINE\
+	// HKEY_USERS			-->		\REGISTRY\USER\
+	// HKEY_CURRENT_CONFIG  -->		\REGISTRY\MACHINE\SYSTEM\ControlSet001\Hardware Profiles\0001\
+
+
+	static const WCHAR hKeyClasses[] =				L"\\REGISTRY\\MACHINE\\SOFTWARE\\Classes\\";
+	static const WCHAR hKeyCurrentUser[] =			L"\\REGISTRY\\USER\\SID";
+	static const WCHAR hKeyLocalMachine[] =			L"\\REGISTRY\\MACHINE\\";
+	static const WCHAR hKeyUsers[] =				L"\\REGISTRY\\USER\\";
+	static const WCHAR hKeyCurrConfig[] =			L"\\REGISTRY\\MACHINE\\SYSTEM\\ControlSet001\\Hardware Profiles\\0001\\";
+	
+
+
+
+	switch ((REG_NOTIFY_CLASS)(ULONG_PTR)arg1) 
+	{
+		case RegNtPreSetValueKey:
+		{
+			auto args = static_cast<REG_SET_VALUE_KEY_INFORMATION*> (arg2);
+
+			PCUNICODE_STRING name;
+			// WE WILL TRANSLATE EACH DRIVER REGISTRY PATH TO A USERMODE PATH AND THEN COMPARE TO THE PROTECTED KEYS
+			if (NT_SUCCESS(CmCallbackGetKeyObjectIDEx(&g_Struct.RegCookie, args->Object, nullptr, &name, 0))) {
+				// filter out none-HKLM writes
+				KdPrint(("Registry Key set value: %wZ\n", name));
+				bool check = false;
+				check = CheckLockedRegistryKey(g_Struct.LockedRegHead.Flink, name);
+				if (check) {
+					status = STATUS_ACCESS_DENIED;
+				}
+
+
+				CmCallbackReleaseKeyObjectIDEx(name);
+				break;
+
+			}
+		}
+			
+	}
+
+	return status;
+}
+
+	

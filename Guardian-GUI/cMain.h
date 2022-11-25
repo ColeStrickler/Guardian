@@ -88,6 +88,7 @@ private:
 	bool CheckExistingRegistryKey(HANDLE HandleLockedPathConfigFile, std::string RegKey);
 	void PrintYaraScanFile(std::vector<std::string> matchedRules, std::string FilePath);
 	void PrintYaraScanProcess(std::vector<std::string> matchedRules, std::string ProcName, DWORD processId);
+	std::string UserRegistryToKernelRegistry(std::string UserRegistryKey);
 
 
 // PRIVATE VARIABLES

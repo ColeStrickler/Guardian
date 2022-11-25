@@ -144,3 +144,56 @@ std::string GetProcnameFromId(DWORD procId)
 	CloseHandle(hSnap);
 	return ret;
 }
+
+
+std::string GetCurrentSid() {
+	HANDLE hProc;
+	HANDLE hToken;
+	PTOKEN_USER TokenUserInfo;
+	std::string ret;
+	LPSTR strPtr = nullptr;
+	DWORD retBytes;
+
+	hProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, GetCurrentProcessId());
+	if (!hProc) {
+		ret = "0";
+		return ret;
+	}
+
+
+	if (!OpenProcessToken(hProc, TOKEN_READ, &hToken)) {
+		ret = "0";
+		return ret;
+	}
+	if (!GetTokenInformation(hToken, TokenUser, NULL, 0, &retBytes) && ERROR_INSUFFICIENT_BUFFER != GetLastError()) {
+		ret = "0";
+		return ret;
+	}
+
+	BYTE* buf = new BYTE[retBytes];
+	if (buf == nullptr) {
+		ret = "0";
+		return ret;
+	}
+
+
+	TokenUserInfo = (PTOKEN_USER)buf;
+	if (!GetTokenInformation(hToken, TokenUser, TokenUserInfo, retBytes, &retBytes)) {
+		ret = "0";
+		return ret;
+	}
+
+
+
+	bool success = ConvertSidToStringSidA(TokenUserInfo->User.Sid, &strPtr);
+	if (success) {
+		ret = std::string(strPtr);
+		return ret;
+
+	}
+	else {
+		ret = "0";
+		return ret;
+	}
+
+}
