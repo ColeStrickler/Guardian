@@ -3,7 +3,6 @@
 
 
 Service::Service() {
-	printf("HERE!\n");
 	hFile = INVALID_HANDLE_VALUE;			// WE DO THIS LOOP HERE, BECAUSE WE WANT THE SERVICE TO RUNNING WHILE THE DRIVER ADDS ITS PID TO ITS PROTECTION ARRAY
 	while (hFile == INVALID_HANDLE_VALUE) {	
 		hFile = CreateFile(L"\\\\.\\guardian", GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, 0, nullptr);
