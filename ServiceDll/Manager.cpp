@@ -104,6 +104,7 @@ void Manager<Hook::x64>::GetDriverCommands()
 				ExitVar = TRUE;
 			}
 		}
+		Sleep(200);
 	}
 }
 
@@ -129,5 +130,6 @@ void Manager<Hook::x86>::GetDriverCommands()
 				ExitVar = TRUE;
 			}
 		}
+		Sleep(200);
 	}
 }

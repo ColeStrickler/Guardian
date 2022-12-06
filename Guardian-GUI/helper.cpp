@@ -197,3 +197,5 @@ std::string GetCurrentSid() {
 	}
 
 }
+
+

@@ -9,6 +9,9 @@
 // TEMP
 #include <iostream>
 
+#define SERVICE_DLL_64 "C:\\Program Files\\Guardian\\utils\\service64.dll"
+#define SERVICE_DLL_32 "C:\\Program Files\\Guardian\\utils\\service32.dll"
+
 
 #define IOCTL_READ_WORKITEMS CTL_CODE(0x8000, 0x801, METHOD_OUT_DIRECT, FILE_ANY_ACCESS)
 #define IOCTL_WRITE_ALERT CTL_CODE(0x8000, 0x802, METHOD_IN_DIRECT, FILE_ANY_ACCESS)
@@ -76,6 +79,7 @@ enum class TaskType : short {
 	ScanProcess,
 	ScanFile,
 	SystemScan,
+	StartApiMonitor
 };
 
 enum class SystemScanType : short {
@@ -104,6 +108,12 @@ struct SystemScanHeaderJob : TaskHeader {
 	SystemScanType ScanType;
 };
 
+struct ApiMonitorJob : TaskHeader {
+	ULONG Command;
+	ULONG PID;
+};
+
+
 
 
 // WE WILL FILL OUT THESE STRUCTS WITH INFORMATION AS THE JOBS ARE COMPLETED
@@ -120,7 +130,17 @@ struct SystemScanHeaderFull : SystemScanHeaderJob {
 };
 
 
+namespace Injector {
 
+	class DllThreadInjector {
+	public:
+		DllThreadInjector();
+		~DllThreadInjector();
+		bool InjectDll(DWORD procId, const char* DllPath);
+	};
+
+
+}
 
 
 
@@ -156,6 +176,7 @@ private:
 
 // PRIVATE VARIABLES
 private:
+	static Injector::DllThreadInjector Injector;
 
 };
 

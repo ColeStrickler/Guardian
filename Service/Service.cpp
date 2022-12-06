@@ -2,6 +2,43 @@
 
 
 
+
+Injector::DllThreadInjector::DllThreadInjector()
+{
+
+}
+
+Injector::DllThreadInjector::~DllThreadInjector()
+{
+
+}
+
+bool Injector::DllThreadInjector::InjectDll(DWORD procId, const char* dllPath)
+{
+
+	HANDLE hProc = OpenProcess(PROCESS_ALL_ACCESS, 0, procId);
+	if (hProc && hProc != INVALID_HANDLE_VALUE) {
+		void* WriteLocation = VirtualAllocEx(hProc, 0, MAX_PATH, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+		WriteProcessMemory(hProc, WriteLocation, dllPath, strlen(dllPath) + 1, 0);
+
+		HANDLE hThread = CreateRemoteThread(hProc, 0, 0, (LPTHREAD_START_ROUTINE)LoadLibraryA, WriteLocation, 0, 0);
+		if (hThread) {
+			CloseHandle(hThread);
+			if (hProc) {
+				CloseHandle(hProc);
+			}
+			return TRUE;
+		}
+
+	}
+
+	if (hProc) {
+		CloseHandle(hProc);
+	}
+
+	return FALSE;
+}
+
 Service::Service() {
 	hFile = INVALID_HANDLE_VALUE;			// WE DO THIS LOOP HERE, BECAUSE WE WANT THE SERVICE TO RUNNING WHILE THE DRIVER ADDS ITS PID TO ITS PROTECTION ARRAY
 	while (hFile == INVALID_HANDLE_VALUE) {	
@@ -203,17 +240,43 @@ void Service::StartWorkerThread() {
 
 				break;
 			}
+			case TaskType::StartApiMonitor:
+			{
+				auto StartApiMonJob = CONTAINING_RECORD(currEntry, WorkItem<ApiMonitorJob>, Entry);
+				auto pid = StartApiMonJob->Data.PID;
+				if (!ProcIdExists((DWORD)pid)) {
+					break;
+				}
+				
+				// DETERMINE ARCHITECTURE OF PROCESS
+				HANDLE hProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, (DWORD)pid);
+				if (!hProc) {
+					break;
+				}
+				BOOL check;
+				BOOL success = IsWow64Process(hProc, &check);
+				if (!success) {
+					if (hProc) {
+						CloseHandle(hProc);
+					}
+					break;
+				}
+
+				// ATTEMPT TO INJECT DLL INTO TARGET PROCESS
+				if (check) {
+					bool success = Injector.InjectDll((DWORD)pid, SERVICE_DLL_32);
+				}
+				else {
+					bool success = Injector.InjectDll((DWORD)pid, SERVICE_DLL_64);
+				}
+				break;
+			}
 			default:
 				printf("default\n");
 				break;
 
 		}
-		printf("bottom\n");
 		continue;
-
-
-
-
 
 	}
 
@@ -324,6 +387,22 @@ void Service::StartDriverReadThread() {
 
 
 					InterlockedPushEntrySList(&workItemsHead, &NewSystemScanTask->Entry);
+					workItemsCount++;
+					break;
+				}
+				case TaskType::StartApiMonitor:
+				{
+					auto ApiMonitorTask = (ApiMonitorJob*)buffer;
+					auto NewApiMonitorTask = new WorkItem<ApiMonitorJob>();
+
+
+					NewApiMonitorTask->Data.Command = ApiMonitorTask->Command;
+					NewApiMonitorTask->Data.PID = ApiMonitorTask->PID;
+					NewApiMonitorTask->Data.Size = ApiMonitorTask->Size;
+					NewApiMonitorTask->Data.Type = ApiMonitorTask->Type;
+
+
+					InterlockedPushEntrySList(&workItemsHead, &NewApiMonitorTask->Entry);
 					workItemsCount++;
 					break;
 				}

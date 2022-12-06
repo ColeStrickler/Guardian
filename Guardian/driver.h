@@ -30,7 +30,11 @@ typedef NTSTATUS(*QUERY_INFO_PROCESS)(
 
 
 
-
+struct ApiCommand {
+	LIST_ENTRY Entry;
+	ULONG Command;
+	ULONG PID;
+};
 
 
 

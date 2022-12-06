@@ -4,18 +4,12 @@
 
 
 
-template<typename T>
-struct WorkItem {
-	LIST_ENTRY Entry;
-	T Data;
-};
-
-
 
 enum class TaskType : short {
 	ScanProcess,
 	ScanFile,
 	SystemScan,
+	StartApiMonitor
 };
 
 enum class SystemScanType : short {
@@ -42,4 +36,9 @@ struct ScanFileHeaderJob : TaskHeader {
 
 struct SystemScanHeaderJob : TaskHeader {
 	SystemScanType ScanType;
+};
+
+struct ApiMonitorJob : TaskHeader {
+	ULONG Command;
+	ULONG PID;
 };

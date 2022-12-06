@@ -2,10 +2,18 @@
 #include "wx/wx.h"
 #include "Common.h"
 #include <cstdio>
+#include <winternl.h>
 #include "helper.h"
 #include "RAII.h"
 #include "service.h"
+#include "linkedlist.h"
 
+
+template<typename T>
+struct DataItem {
+	lEntry Entry;
+	T Data;
+};
 
 
 // wxFrame is basically a form
@@ -55,6 +63,20 @@ public:
 	wxTextCtrl* AddBlockedRegistryKeyTxtBox = nullptr;
 	int AddBlockedRegistryKeyTxtBoxId = 11;
 
+	wxButton* startApiMonitorBtn = nullptr;
+	int startApiMonitorBtnId = 12;
+
+	wxTextCtrl* startApiMonitorTxtBox = nullptr;
+	int startApiMonitorTxtBoxId = 13;
+
+	wxButton* stopApiMonitorBtn = nullptr;
+	int stopApiMonitorBtnId = 14;
+
+	wxTextCtrl* stopApiMonitorTxtBox = nullptr;
+	int stopApiMonitorTxtBoxId = 15;
+
+
+
 	wxGauge* m_statBar1 = nullptr;						// WE WILL USE THIS LATER TO GAUGE SCAN PROGRESS
 
 	// must include this macro for events
@@ -73,6 +95,8 @@ public:
 public:
 	void AddBlockedFilePathBtnFunc(wxCommandEvent& evt);
 	void AddLockedRegistryKey(wxCommandEvent& evt);
+	void StartApiMonitor(wxCommandEvent& evt);
+	void StopApiMonitor(wxCommandEvent& evt);
 	void YaraScanFile(wxCommandEvent& evt);
 	void YaraScanProcess(wxCommandEvent& evt);
 	void DisplayInfo(BYTE* buffer, DWORD size);
@@ -89,11 +113,12 @@ private:
 	void PrintYaraScanFile(std::vector<std::string> matchedRules, std::string FilePath);
 	void PrintYaraScanProcess(std::vector<std::string> matchedRules, std::string ProcName, DWORD processId);
 	std::string UserRegistryToKernelRegistry(std::string UserRegistryKey);
-
+	bool PidAlreadyMonitored(DWORD pid);
 
 // PRIVATE VARIABLES
 private: 
 	const wchar_t* BlockedFilePathConfig = L"C:\\Program Files\\Guardian\\conf\\paths.conf";
 	const wchar_t* LockedRegistryPathConfig = L"C:\\Program Files\\Guardian\\conf\\reg.conf";
+	PListHeader MonitoredProcs;
 };
 

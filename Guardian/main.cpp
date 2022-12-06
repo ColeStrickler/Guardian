@@ -36,6 +36,17 @@ struct Globals {
 	LIST_ENTRY ServiceWorkItemsHead{0};
 	int ServiceWorkItemsCount{0};
 	FastMutex ServiceWorkItemsMutex;
+
+	// API MONITOR COMMANDS SLL
+	LIST_ENTRY ApiMonitorCommandHead{0};
+	int ApiMonitorCommandCount{0};
+	FastMutex ApiMonitorCommandMutex;
+
+	// API EVENT SLL
+	LIST_ENTRY ApiEventHead{0};
+	int ApiEventCount{0};
+	FastMutex ApiEventMutex;
+
 	
 	// OTHER GLOBAL CONFIG
 	RTL_OSVERSIONINFOW versionInfo{0};
@@ -286,6 +297,26 @@ NTSTATUS InitBlockedExecutionPaths()
 }
 
 
+WorkItem<ApiMonitorJob>* CheckApiMonitorCommands(LIST_ENTRY* ApiCommandHead, ULONG Pid)
+{
+	AutoLock<FastMutex> lock(g_Struct.ApiMonitorCommandMutex);
+
+	if (IsListEmpty(&g_Struct.ApiMonitorCommandHead)) {
+		return nullptr;
+	}
+
+	auto curr = CONTAINING_RECORD(ApiCommandHead, WorkItem<ApiMonitorJob>, Entry);
+	while ((uintptr_t)curr != (uintptr_t)&g_Struct.ApiMonitorCommandHead) {
+		if (Pid == curr->Data.PID) {
+			RemoveEntryList(&curr->Entry);
+			return curr;
+		}
+		curr = CONTAINING_RECORD(curr->Entry.Flink, WorkItem<ApiMonitorJob>, Entry);
+	}
+
+	return nullptr;
+}
+
 
 OB_PREOP_CALLBACK_STATUS PreOpenServiceProcess(PVOID, POB_PRE_OPERATION_INFORMATION Info) {
 	if (Info->KernelHandle) {
@@ -357,14 +388,23 @@ DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING) {
 		return STATUS_UNSUCCESSFUL;
 	}
 
+	// Initialize Linked lists
 	InitializeListHead(&g_Struct.AlertsHead);
 	InitializeListHead(&g_Struct.BlockedPathsHead);
 	InitializeListHead(&g_Struct.ServiceWorkItemsHead);
 	InitializeListHead(&g_Struct.LockedRegHead);
+	InitializeListHead(&g_Struct.ApiMonitorCommandHead);
+	InitializeListHead(&g_Struct.ApiEventHead);
+
+	// Initialize Mutexes
 	g_Struct.AlertsHeadMutex.Init();
 	g_Struct.BlockedPathsMutex.Init();
 	g_Struct.ServiceWorkItemsMutex.Init();
 	g_Struct.LockedRegMutex.Init();
+	g_Struct.ApiMonitorCommandMutex.Init();
+	g_Struct.ApiEventMutex.Init();
+
+	// Get Version
 	RtlGetVersion(&g_Struct.versionInfo);
 	KdPrint(("Version %d.%d.%d found!\n", g_Struct.versionInfo.dwMajorVersion, g_Struct.versionInfo.dwMinorVersion, g_Struct.versionInfo.dwBuildNumber));
 	
@@ -1117,12 +1157,187 @@ NTSTATUS IoControl(PDEVICE_OBJECT, PIRP Irp) {
 				break;
 			}
 
+
 			default:
 				break; 
 		}
 
 
 
+
+		break;
+	}
+
+	case IOCTL_READ_COMAPI:
+	{
+		ULONG Pid = (ULONG)PsGetCurrentProcessId();
+		if (!Pid) {
+			break;
+		}
+		auto len = stack->Parameters.DeviceIoControl.OutputBufferLength;
+
+		if (len < sizeof(ULONG) || len > sizeof(ULONG)) {	// check command size
+			status = STATUS_INVALID_PARAMETER;
+			break;
+		}
+
+		ULONG* outBuffer = (ULONG*)Irp->UserBuffer;			// METHOD_NEITHER
+		if (!outBuffer) {
+			status = STATUS_INVALID_PARAMETER;
+			break;
+		}
+
+
+		if (g_Struct.ApiMonitorCommandCount == 0) {
+			break;
+		}
+
+		WorkItem<ApiMonitorJob>* Command = CheckApiMonitorCommands(g_Struct.ApiMonitorCommandHead.Flink, Pid);
+		if (!Command) {
+			break;
+		}
+
+		KdPrint(("Reading ApiMonitor Command %d to PID: %d\n", Command->Data.Command, Pid));
+		memcpy(outBuffer, &Command->Data.Command, sizeof(ULONG));
+		ExFreePool(Command);
+
+		break;
+	}
+
+
+	case IOCTL_WRITE_COMAPI:
+	{
+		auto len = stack->Parameters.DeviceIoControl.InputBufferLength;
+		if (len != sizeof(ApiMonitorJob)) {
+			status = STATUS_INVALID_PARAMETER;
+			break;
+		}
+
+		auto entry = (WorkItem<ApiMonitorJob>*)ExAllocatePoolWithTag(NonPagedPool, sizeof(WorkItem<ApiMonitorJob>), DRIVER_TAG);
+		if (!entry) {
+			status = STATUS_INSUFFICIENT_RESOURCES;
+			break;
+		}
+
+		memcpy(&entry->Data, stack->Parameters.DeviceIoControl.Type3InputBuffer, sizeof(ApiMonitorJob));
+		if (entry->Data.Command == COMMAND_START) {
+			PushItem(&entry->Entry, &g_Struct.ServiceWorkItemsHead, g_Struct.ServiceWorkItemsMutex, g_Struct.ServiceWorkItemsCount);
+		}
+		else if (entry->Data.Command == COMMAND_EJECT) {
+			PushItem(&entry->Entry, &g_Struct.ApiMonitorCommandHead, g_Struct.ApiMonitorCommandMutex, g_Struct.ApiMonitorCommandCount);
+		}
+		else {
+			ExFreePool(entry);
+		}
+		
+		break;
+	}
+
+	case IOCTL_API_EVENT:
+	{
+		NT_ASSERT(Irp->MdlAddress);
+		//auto len = stack->Parameters.DeviceIoControl.OutputBufferLength;
+		auto buffer = (UCHAR*)MmGetSystemAddressForMdlSafe(Irp->MdlAddress, NormalPagePriority);
+		if (!buffer) {
+			KdPrint(("Could not get MdlAddress.\n"));
+			status = STATUS_INSUFFICIENT_RESOURCES;
+			break;
+		}
+
+		ApiMon* mon = (ApiMon*)buffer;
+
+		switch (mon->EventType) {
+			case ApiEvent::CreateFileW:
+			{
+				ULONG allocSize = 0;
+				allocSize += sizeof(WorkItem<ApiMon>);
+				allocSize += sizeof(CreateFileWParameters);
+
+				auto buf = (UCHAR*)ExAllocatePoolWithTag(NonPagedPool, allocSize, DRIVER_TAG);
+				if (!buf) {
+					break;
+				}
+
+				auto apimon = (WorkItem<ApiMon>*)buf;
+				apimon->Data.size = sizeof(ApiMon) + sizeof(CreateFileWParameters);				// data only
+				apimon->Data.pid = mon->pid;
+				apimon->Data.EventType = ApiEvent::CreateFileW;
+				memcpy(buf + sizeof(WorkItem<ApiMon>), buffer + sizeof(ApiMon), sizeof(CreateFileWParameters));
+
+
+				PushItem(&apimon->Entry, &g_Struct.ApiEventHead, g_Struct.ApiEventMutex, g_Struct.ApiEventCount);
+				break;
+			}
+
+			case ApiEvent::OpenProcess:
+			{
+				ULONG allocSize = 0;
+				allocSize += sizeof(WorkItem<ApiMon>);
+				allocSize += sizeof(OpenProcessParams);
+
+				auto buf = (UCHAR*)ExAllocatePoolWithTag(NonPagedPool, allocSize, DRIVER_TAG);
+				if (!buf) {
+					break;
+				}
+
+				auto apimon = (WorkItem<ApiMon>*)buf;
+				apimon->Data.size = sizeof(ApiMon) + sizeof(OpenProcessParams);					// data only
+				apimon->Data.pid = mon->pid;
+				apimon->Data.EventType = ApiEvent::OpenProcess;
+				memcpy(buf + sizeof(WorkItem<ApiMon>), buffer + sizeof(ApiMon), sizeof(OpenProcessParams));
+
+
+				PushItem(&apimon->Entry, &g_Struct.ApiEventHead, g_Struct.ApiEventMutex, g_Struct.ApiEventCount);
+				break;
+			}
+
+			case ApiEvent::ReadFile:
+			{
+				ULONG allocSize = 0;
+				allocSize += sizeof(WorkItem<ApiMon>);
+				allocSize += sizeof(ReadFileParams);
+				auto buf = (UCHAR*)ExAllocatePoolWithTag(NonPagedPool, allocSize, DRIVER_TAG);
+				if (!buf) {
+					break;
+				}
+
+				auto apimon = (WorkItem<ApiMon>*)buf;
+				apimon->Data.size = sizeof(ApiMon) + sizeof(ReadFileParams);					// data only
+				apimon->Data.pid = mon->pid;
+				apimon->Data.EventType = ApiEvent::ReadFile;
+				memcpy(buf + sizeof(WorkItem<ApiMon>), buffer + sizeof(ApiMon), sizeof(ReadFileParams));
+
+				PushItem(&apimon->Entry, &g_Struct.ApiEventHead, g_Struct.ApiEventMutex, g_Struct.ApiEventCount);
+				break;
+			}
+
+			case ApiEvent::WriteFile:
+			{
+				ULONG allocSize = 0;
+
+				auto WriteFile = (WriteFileParams*)(buffer + sizeof(ApiMon));
+				allocSize += sizeof(WorkItem<ApiMon>);
+				allocSize += sizeof(OpenProcessParams);
+				allocSize += WriteFile->numCopyBytes;
+				auto buf = (UCHAR*)ExAllocatePoolWithTag(NonPagedPool, allocSize, DRIVER_TAG);
+				if (!buf) {
+					break;
+				}
+
+				auto apimon = (WorkItem<ApiMon>*)buf;
+				apimon->Data.size = sizeof(ApiMon) + sizeof(WriteFileParams);					// data only
+				apimon->Data.pid = mon->pid;
+				apimon->Data.EventType = ApiEvent::WriteFile;
+				memcpy(buf + sizeof(WorkItem<ApiMon>), buffer + sizeof(ApiMon), sizeof(ReadFileParams));
+				memcpy(buf + sizeof(WorkItem<ApiMon>) + sizeof(WriteFileParams), buffer + sizeof(ApiMon) + sizeof(WriteFileParams), WriteFile->numCopyBytes);
+
+				PushItem(&apimon->Entry, &g_Struct.ApiEventHead, g_Struct.ApiEventMutex, g_Struct.ApiEventCount);
+				break;
+			}
+
+			default:
+				break;
+		}
 
 		break;
 	}
@@ -1140,19 +1355,16 @@ NTSTATUS IoControl(PDEVICE_OBJECT, PIRP Irp) {
 
 void OnImageLoadNotify(PUNICODE_STRING FullImageName, HANDLE ProcessId, PIMAGE_INFO ImageInfo)
 {
-
-	 
-
 	return;
 }
 
 // RETURN TRUE IF A MATCH IS FOUND
 bool CheckLockedRegistryKey(LIST_ENTRY* LockedKeysListHead, PCUNICODE_STRING KeyName) {
 	AutoLock<FastMutex> lock(g_Struct.LockedRegMutex);
+
 	if (IsListEmpty(&g_Struct.LockedRegHead)) {
 		return false;
 	}
-
 
 	BlockedPathNode* entry = CONTAINING_RECORD(LockedKeysListHead, BlockedPathNode, Entry);
 	BlockedPathNode* head = entry;
@@ -1173,6 +1385,8 @@ bool CheckLockedRegistryKey(LIST_ENTRY* LockedKeysListHead, PCUNICODE_STRING Key
 
 	return false;
 }
+
+
 
 
 NTSTATUS OnRegistryNotify(PVOID context, PVOID arg1, PVOID arg2)

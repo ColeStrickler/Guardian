@@ -7,6 +7,8 @@ EVT_BUTTON(10001, AddBlockedFilePathBtnFunc)
 EVT_BUTTON(10002, YaraScanFile)
 EVT_BUTTON(10003, YaraScanProcess)
 EVT_BUTTON(10004, AddLockedRegistryKey)
+EVT_BUTTON(10005, StartApiMonitor)
+EVT_BUTTON(10006, StopApiMonitor)
 
 wxEND_EVENT_TABLE()
 
@@ -271,12 +273,13 @@ cMain::cMain() : wxFrame(nullptr, wxID_ANY, "Guardian", wxPoint(30, 30), wxSize(
 
     hFile = CreateFile(L"\\\\.\\guardian", GENERIC_READ, 0, nullptr, OPEN_EXISTING, 0, nullptr);
     if (hFile == INVALID_HANDLE_VALUE) {
-  
         MessageBoxA(NULL, "Unable to obtain handle to Guardian Kernel mode component", "Could not start", MB_ICONERROR | MB_DEFBUTTON1);
-      //  exit(-1);
     }
 
+    // LINKED LIST INITIALIZATION
+    InitializeListHeader(&this->MonitoredProcs);
     
+
     // ADD BLOCKED FILE         wxPoint(410, 20), wxSize(200, 200), userChoices
     userChoicesAddBlockedFile = new wxComboBox(this, wxID_ANY, wxString("<select user>"), wxPoint(410, 20), wxSize(200, 20));
     initUserArray(listUsers());
@@ -296,11 +299,19 @@ cMain::cMain() : wxFrame(nullptr, wxID_ANY, "Guardian", wxPoint(30, 30), wxSize(
     AddBlockedRegistryKeyBtn = new wxButton(this, 10004, "Add Blocked Registry Key", wxPoint(10, 80), wxSize(200, 20));
     AddBlockedRegistryKeyTxtBox = new wxTextCtrl(this, wxID_ANY, "<registry key>", wxPoint(210, 80), wxSize(200, 20));
 
+    // START API MONITOR
+    startApiMonitorBtn = new wxButton(this, 10005, "Start Api Monitor", wxPoint(10, 100), wxSize(200, 20));
+    startApiMonitorTxtBox = new wxTextCtrl(this, wxID_ANY, "<pid>", wxPoint(210, 100), wxSize(200, 20));
+
+    // STOP API MONITOR
+    stopApiMonitorBtn = new wxButton(this, 10006, "Stop Api Monitor", wxPoint(10, 120), wxSize(200, 20));
+    startApiMonitorTxtBox = new wxTextCtrl(this, wxID_ANY, "<pid>", wxPoint(210, 120), wxSize(200, 20));
+
     // EVENT/ALERT FEED
 	AlertFeed = new wxListBox(this, wxID_ANY, wxPoint(10, 210), wxSize(500, 400));
     hEventThread = CreateThread(0, 0, reinterpret_cast<LPTHREAD_START_ROUTINE>(displayEventThread), this, 0, 0);
 
-   
+    
 
 
     // SCAN RESULTS TEXT BOX
@@ -311,6 +322,141 @@ cMain::cMain() : wxFrame(nullptr, wxID_ANY, "Guardian", wxPoint(30, 30), wxSize(
 
 cMain::~cMain() {
     CloseHandle(hFile);
+}
+
+
+bool cMain::PidAlreadyMonitored(DWORD pid)
+{
+    if (MonitoredProcs->EntryCount == 0) {
+        return false;
+    }
+
+    auto curr = CONTAINING_RECORD(MonitoredProcs->Entry.Flink, DataItem<ApiMonitorJob>, Entry);
+
+    while (true) {
+        if (curr->Data.PID == pid) {
+            return true;
+        }
+        
+        if ((uintptr_t)curr->Entry.Flink == (uintptr_t)MonitoredProcs) {
+            break;
+        }
+        curr = CONTAINING_RECORD(curr->Entry.Flink, DataItem<ApiMonitorJob>, Entry);
+    }
+
+    return false;
+}
+
+void cMain::StartApiMonitor(wxCommandEvent& evt)
+{
+   BOOL success = true;
+   DWORD pid = atoi(std::string(startApiMonitorTxtBox->GetValue().mb_str()).c_str());
+   if (!ProcIdExists(pid)) {
+       MessageBoxA(NULL, "PID does not exist.", "Error", MB_ICONERROR | MB_DEFBUTTON1);
+       evt.Skip();
+       return;
+   }
+
+   if (PidAlreadyMonitored(pid)) {
+       MessageBoxA(NULL, "PID already being monitored.", "Error", MB_ICONERROR | MB_DEFBUTTON1);
+       evt.Skip();
+       return;
+   }
+
+
+   DataItem<ApiMonitorJob>* NewJob = new DataItem<ApiMonitorJob>;
+   NewJob->Data.Type = TaskType::StartApiMonitor;
+   NewJob->Data.Size = sizeof(ApiMonitorJob);
+   NewJob->Data.Command = COMMAND_START;
+   NewJob->Data.PID = pid;
+   
+   
+
+   DWORD retBytes;
+   success = DeviceIoControl(
+       hFile,
+       IOCTL_WRITE_COMAPI,
+       &NewJob->Data,
+       sizeof(ApiMonitorJob),
+       nullptr,
+       0,
+       &retBytes,
+       0
+   );
+   
+   if (!success) {
+       MessageBoxA(NULL, "Failed to write API monitor job.", "Error", MB_ICONERROR | MB_DEFBUTTON1);
+       evt.Skip();
+       if (NewJob) {
+           free(NewJob);
+       }
+       return;
+   }
+   PushEntry(MonitoredProcs, &NewJob->Entry);
+
+   evt.Skip();
+   return;
+}
+
+
+void cMain::StopApiMonitor(wxCommandEvent& evt)
+{
+    BOOL success = true;
+    DWORD pid = atoi(std::string(stopApiMonitorTxtBox->GetValue().mb_str()).c_str());
+    if (!ProcIdExists(pid)) {
+        MessageBoxA(NULL, "PID does not exist.", "Error", MB_ICONERROR | MB_DEFBUTTON1);
+        evt.Skip();
+        return;
+    }
+
+    if (!PidAlreadyMonitored(pid)) {
+        MessageBoxA(NULL, "PID is not currently being monitored.", "Error", MB_ICONERROR | MB_DEFBUTTON1);
+        evt.Skip();
+        return;
+    }
+
+    DataItem<ApiMonitorJob> NewJob;
+    NewJob.Data.Type = TaskType::StartApiMonitor;
+    NewJob.Data.Size = sizeof(ApiMonitorJob);
+    NewJob.Data.Command = COMMAND_EJECT;
+    NewJob.Data.PID = pid;
+
+    DWORD retBytes;
+    success = DeviceIoControl(
+        hFile,
+        IOCTL_WRITE_COMAPI,
+        &NewJob.Data,
+        sizeof(ApiMonitorJob),
+        nullptr,
+        0,
+        &retBytes,
+        0
+    );
+
+    if (!success) {
+        MessageBoxA(NULL, "Failed to write API monitor job.", "Error", MB_ICONERROR | MB_DEFBUTTON1);
+        evt.Skip();
+        return;
+    }
+
+
+    auto curr = CONTAINING_RECORD(MonitoredProcs->Entry.Flink, DataItem<ApiMonitorJob>, Entry);
+
+    while (true) {
+        if (curr->Data.PID == pid) {
+            DataItem<ApiMonitorJob>* node = CONTAINING_RECORD(RemoveEntry(MonitoredProcs, &curr->Entry), DataItem<ApiMonitorJob>, Entry);
+            free(node);
+            break;
+        }
+        if ((uintptr_t)curr->Entry.Flink == (uintptr_t)MonitoredProcs) {
+            break;
+        }
+        auto entry = CONTAINING_RECORD(curr->Entry.Flink, DataItem<ApiMonitorJob>, Entry);
+    }
+    
+
+    evt.Skip();
+    return;
 }
 
 

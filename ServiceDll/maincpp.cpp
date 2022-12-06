@@ -2,25 +2,6 @@
 #include <string>
 
 
-BYTE* CopyToInputBuf(void* Parameter, SIZE_T ParameterSize, BYTE* buf) {
-    memcpy(buf, Parameter, ParameterSize);
-    buf += ParameterSize;
-    memset(buf, 0x3b, 3);
-    buf += 3;
-    return buf;
-}
-
-struct CreateFileWParameters {
-    DWORD FileNameSize;
-    DWORD dwDesiredAccess;
-    DWORD dwShareMode;
-    LPSECURITY_ATTRIBUTES lpSecurityAttributes;
-    DWORD dwCreationDisposition;
-    DWORD dwFlagsAndAttributes;
-    HANDLE hTemplateFile;
-};
-
-
 HANDLE(__stdcall* TrampolineCreateFileW)(LPCWSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode, LPSECURITY_ATTRIBUTES lpSecurityAttributes,
     DWORD dwCreationDisposition, DWORD dwFlagsAndAttributes, HANDLE hTemplateFile);
 
@@ -43,6 +24,7 @@ HANDLE __stdcall HookedCreateFileW(LPCWSTR lpFileName, DWORD dwDesiredAccess, DW
     IrpStruct = (ApiMon*)buf;
     IrpStruct->EventType = ApiEvent::CreateFileW;
     IrpStruct->pid = GetCurrentProcessId();
+    IrpStruct->size = 0;
     buf += sizeof(ApiMon);
 
 
@@ -71,12 +53,6 @@ HANDLE __stdcall HookedCreateFileW(LPCWSTR lpFileName, DWORD dwDesiredAccess, DW
 }
 
 
-struct OpenProcessParams {
-    DWORD dwDesiredAccess;
-    BOOL bInheritHandle;
-    DWORD dwProcessId;
-};
-
 HANDLE(__stdcall* TrampolineOpenProcess)(DWORD dwDesiredAccess, BOOL bInheritHandle, DWORD dwProcessId);
 
 HANDLE __stdcall HookedOpenProcess(DWORD dwDesiredAccess, BOOL bInheritHandle, DWORD dwProcessId) 
@@ -94,6 +70,7 @@ HANDLE __stdcall HookedOpenProcess(DWORD dwDesiredAccess, BOOL bInheritHandle, D
     IrpStruct = (ApiMon*)buf;
     IrpStruct->EventType = ApiEvent::OpenProcess;
     IrpStruct->pid = GetCurrentProcessId();
+    IrpStruct->size = 0;
     buf += sizeof(ApiMon);
 
     OpenProcessParams* Params = (OpenProcessParams*)buf;
@@ -117,14 +94,6 @@ HANDLE __stdcall HookedOpenProcess(DWORD dwDesiredAccess, BOOL bInheritHandle, D
 }
 
 
-struct ReadFileParams {
-    HANDLE hFile;
-    LPVOID lpBuffer;
-    DWORD nNumberOfBytesToRead;
-    LPDWORD lpNumberOfBytesRead;
-    LPOVERLAPPED lpOverlapped;
-};
-
 BOOL(__stdcall* TrampolineReadFile)(HANDLE hFile, LPVOID lpBuffer, DWORD nNumberOfBytesToRead, LPDWORD lpNumberOfBytesRead, LPOVERLAPPED lpOverlapped);
 
 BOOL __stdcall HookedReadFile(HANDLE hFile, LPVOID lpBuffer, DWORD nNumberOfBytesToRead, LPDWORD lpNumberOfBytesRead, LPOVERLAPPED lpOverlapped) 
@@ -142,6 +111,7 @@ BOOL __stdcall HookedReadFile(HANDLE hFile, LPVOID lpBuffer, DWORD nNumberOfByte
     IrpStruct = (ApiMon*)buf;
     IrpStruct->EventType = ApiEvent::ReadFile;
     IrpStruct->pid = GetCurrentProcessId();
+    IrpStruct->size = 0;
     buf += sizeof(IrpStruct);
 
     ReadFileParams* Params = (ReadFileParams*)buf;
@@ -166,12 +136,6 @@ BOOL __stdcall HookedReadFile(HANDLE hFile, LPVOID lpBuffer, DWORD nNumberOfByte
     return TrampolineReadFile(hFile, lpBuffer, nNumberOfBytesToRead, lpNumberOfBytesRead, lpOverlapped);
 }
 
-struct WriteFileParams {
-    HANDLE hFile;
-    DWORD nNumberOfBytesToWrite;
-    LPDWORD lpNumberOfBytesWritten;
-    LPOVERLAPPED lpOverlapped;
-};
 
 BOOL(__stdcall* TrampolineWriteFile)(HANDLE hFile, LPCVOID lpBuffer, DWORD nNumberOfBytesToWrite, LPDWORD lpNumberOfBytesWritten, LPOVERLAPPED lpOverlapped);
 
@@ -192,6 +156,7 @@ BOOL __stdcall HookedWriteFile(HANDLE hFile, LPCVOID lpBuffer, DWORD nNumberOfBy
     IrpStruct = (ApiMon*)buf;
     IrpStruct->EventType = ApiEvent::WriteFile;
     IrpStruct->pid = GetCurrentProcessId();
+    IrpStruct->size = 0;
     buf += sizeof(ApiMon);
 
     WriteFileParams* Params = (WriteFileParams*)buf;
@@ -199,6 +164,7 @@ BOOL __stdcall HookedWriteFile(HANDLE hFile, LPCVOID lpBuffer, DWORD nNumberOfBy
     Params->nNumberOfBytesToWrite = nNumberOfBytesToWrite;
     Params->lpNumberOfBytesWritten = lpNumberOfBytesWritten;
     Params->lpOverlapped = lpOverlapped;
+    Params->numCopyBytes = numCopyBytes;
     buf += sizeof(WriteFileParams);
 
     memcpy(buf, lpBuffer, numCopyBytes);
