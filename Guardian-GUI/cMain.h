@@ -94,6 +94,7 @@ public:
 public:
 	HANDLE hFile = nullptr;				// HANDLE TO DRIVER SYMLINK
 	HANDLE hEventThread = nullptr;		// HANDLE TO EVENT/ALERT THREAD
+	HANDLE hApiEventThread = nullptr;	// HANDLE TO API EVENT THREAD
 	
 
 

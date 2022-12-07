@@ -120,7 +120,7 @@ void cMain::displayApiEventThread(cMain* main)
             DWORD(1 << 16),
             &bytes,
             nullptr         )) {
-            main->apiEventFeed->AppendString(wxString("Handle to driver file could not be read."));
+            main->AlertFeed->AppendString(wxString("Handle to driver file could not be read."));
             continue;
         }
         if (bytes != 0) {
@@ -152,10 +152,7 @@ void cMain::FormatApiEvents(BYTE* buffer, DWORD size)
                 auto hTemplateFile = cfw->hTemplateFile;
                 auto lpSecurityAttributes = cfw->lpSecurityAttributes;
 
-                if (ApiEvents->EntryCount > 1024) {
-                    PopEntry(ApiEvents);
-                }
-                PushEntry(ApiEvents, &DataItem->Entry);
+
 
                 AlertFeed->AppendString(wxString("CreateFileW"));
                 break;
@@ -172,10 +169,7 @@ void cMain::FormatApiEvents(BYTE* buffer, DWORD size)
                 DataItem->Data.dwDesiredAccess = op->dwDesiredAccess;
                 DataItem->Data.dwProcessId = op->dwProcessId;
 
-                if (ApiEvents->EntryCount > 1024) {
-                    PopEntry(ApiEvents);
-                }
-                PushEntry(ApiEvents, &DataItem->Entry);
+                
 
                 AlertFeed->AppendString(wxString("OpenProcess"));
                 break;
@@ -195,10 +189,7 @@ void cMain::FormatApiEvents(BYTE* buffer, DWORD size)
                 DataItem->Data.nNumberOfBytesToRead = rf->nNumberOfBytesToRead;
                 DataItem->Data.lpOverlapped = rf->lpOverlapped;
 
-                if (ApiEvents->EntryCount > 1024) {
-                    PopEntry(ApiEvents);
-                }
-                PushEntry(ApiEvents, &DataItem->Entry);
+
                 
                 AlertFeed->AppendString(wxString("ReadFile"));
                 break;
@@ -218,10 +209,7 @@ void cMain::FormatApiEvents(BYTE* buffer, DWORD size)
                 DataItem->Data.lpOverlapped = wf->lpOverlapped;
                 DataItem->Data.nNumberOfBytesToWrite = wf->nNumberOfBytesToWrite;
                 
-                if (ApiEvents->EntryCount > 1024) {
-                    PopEntry(ApiEvents);
-                }
-                PushEntry(ApiEvents, &DataItem->Entry);
+
 
                 AlertFeed->AppendString(wxString("WriteFile"));
                 break;
@@ -399,6 +387,7 @@ cMain::cMain() : wxFrame(nullptr, wxID_ANY, "Guardian", wxPoint(30, 30), wxSize(
     InitializeListHeader(&this->MonitoredProcs);
     InitializeListHeader(&this->ApiEvents);
     
+    
 
     // ADD BLOCKED FILE         wxPoint(410, 20), wxSize(200, 200), userChoices
     userChoicesAddBlockedFile = new wxComboBox(this, wxID_ANY, wxString("<select user>"), wxPoint(410, 20), wxSize(200, 20));
@@ -430,7 +419,7 @@ cMain::cMain() : wxFrame(nullptr, wxID_ANY, "Guardian", wxPoint(30, 30), wxSize(
     // EVENT/ALERT FEED
 	AlertFeed = new wxListBox(this, wxID_ANY, wxPoint(10, 210), wxSize(500, 400));
     hEventThread = CreateThread(0, 0, reinterpret_cast<LPTHREAD_START_ROUTINE>(displayEventThread), this, 0, 0);
-
+    hApiEventThread = CreateThread(0, 0, (LPTHREAD_START_ROUTINE)displayApiEventThread, this, 0, 0);
     
 
 

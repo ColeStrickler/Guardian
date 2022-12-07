@@ -636,6 +636,20 @@ void Unload(PDRIVER_OBJECT DriverObject) {
 			}
 		}
 	}
+
+	while (!IsListEmpty(&g_Struct.ApiMonitorCommandHead)) {
+		auto entry = RemoveHeadList(&g_Struct.ApiMonitorCommandHead);
+		ExFreePool(CONTAINING_RECORD(entry, WorkItem<ApiMonitorJob>, Entry));
+	}
+
+	while (!IsListEmpty(&g_Struct.ApiEventHead)) {
+		auto entry = RemoveHeadList(&g_Struct.ApiEventHead);
+		ExFreePool(CONTAINING_RECORD(entry, WorkItem<ApiMon>, Entry));
+	}
+
+
+
+
 	KdPrint(("[UNLOADED]\n"));
 }
 
@@ -835,8 +849,8 @@ NTSTATUS IoControl(PDEVICE_OBJECT, PIRP Irp) {
 	auto stack = IoGetCurrentIrpStackLocation(Irp);
 	auto count = 0;
 
-	KdPrint(("Control Code: 0x%8X\n", stack->Parameters.DeviceIoControl.IoControlCode));
-	KdPrint(("IOCTL_API_EVENT: 0x%8X\n", IOCTL_API_EVENT));
+	//KdPrint(("Control Code: 0x%8X\n", stack->Parameters.DeviceIoControl.IoControlCode));
+
 	switch (stack->Parameters.DeviceIoControl.IoControlCode)
 	{
 
@@ -931,7 +945,7 @@ NTSTATUS IoControl(PDEVICE_OBJECT, PIRP Irp) {
 	{
 		// DIRECT IO BECAUSE THIS COULD BE A LARGE BUFFER
 		NT_ASSERT(Irp->MdlAddress);
-		KdPrint(("Irp->MdlAddress: 0x%8x\n", (ULONGLONG)Irp->MdlAddress));
+		//KdPrint(("Irp->MdlAddress: 0x%8x\n", (ULONGLONG)Irp->MdlAddress));
 
 		auto buffer = (UCHAR*)MmGetSystemAddressForMdlSafe(Irp->MdlAddress, NormalPagePriority);
 		if (!buffer) {
@@ -1131,7 +1145,6 @@ NTSTATUS IoControl(PDEVICE_OBJECT, PIRP Irp) {
 		break;
 	}
 
-
 	case IOCTL_WRITE_ALERT:
 	{
 		KdPrint((DRIVER_PREFIX "[IOCTL_WRITE_ALERT]\n"));
@@ -1256,8 +1269,39 @@ NTSTATUS IoControl(PDEVICE_OBJECT, PIRP Irp) {
 
 	case IOCTL_READ_APIEVENT:
 	{
-		
+		KdPrint(("[IOCTL_READ_APIEVENT]:\n"));
+		// DIRECT IO BECAUSE THIS COULD BE A LARGE BUFFER
+		NT_ASSERT(Irp->MdlAddress);
+		auto len = stack->Parameters.DeviceIoControl.OutputBufferLength;
+		auto buffer = (UCHAR*)MmGetSystemAddressForMdlSafe(Irp->MdlAddress, NormalPagePriority);
+		if (!buffer) {
+			KdPrint(("Could not get MdlAddress.\n"));
+			status = STATUS_INSUFFICIENT_RESOURCES;
+			break;
+		}
 
+
+		AutoLock<FastMutex> lock(g_Struct.ApiEventMutex);
+		while (true) {
+			if (IsListEmpty(&g_Struct.ApiEventHead)) {
+				KdPrint(("[IOCTL_READ_APIEVENT]: List Empty!\n"));
+				break;
+			}
+			auto entry = RemoveHeadList(&g_Struct.ApiEventHead);
+			auto info = CONTAINING_RECORD(entry, WorkItem<ApiMon>, Entry);
+			auto size = info->Data.size;
+
+			if (len < size) {
+				InsertHeadList(&g_Struct.ServiceWorkItemsHead, entry);
+				KdPrint(("Not enough space. Putting back item.\n"));
+				break;
+			}
+			g_Struct.ApiEventCount--;
+			memcpy(buffer, &info->Data, size);
+			buffer += size;
+			count += size;
+			len -= size;
+		}
 
 		break;
 	}
@@ -1279,6 +1323,7 @@ NTSTATUS IoControl(PDEVICE_OBJECT, PIRP Irp) {
 		switch (mon->EventType) {
 			case ApiEvent::CreateFileW:
 			{
+				KdPrint(("CreateFileW API EVENT\n"));
 				ULONG allocSize = 0;
 				allocSize += sizeof(WorkItem<ApiMon>);
 				allocSize += sizeof(CreateFileWParameters);
@@ -1301,6 +1346,7 @@ NTSTATUS IoControl(PDEVICE_OBJECT, PIRP Irp) {
 
 			case ApiEvent::OpenProcess:
 			{
+				KdPrint(("OpenProcess API EVENT\n"));
 				ULONG allocSize = 0;
 				allocSize += sizeof(WorkItem<ApiMon>);
 				allocSize += sizeof(OpenProcessParams);
@@ -1323,6 +1369,7 @@ NTSTATUS IoControl(PDEVICE_OBJECT, PIRP Irp) {
 
 			case ApiEvent::ReadFile:
 			{
+				KdPrint(("ReadFile API EVENT\n"));
 				ULONG allocSize = 0;
 				allocSize += sizeof(WorkItem<ApiMon>);
 				allocSize += sizeof(ReadFileParams);
@@ -1343,6 +1390,7 @@ NTSTATUS IoControl(PDEVICE_OBJECT, PIRP Irp) {
 
 			case ApiEvent::WriteFile:
 			{
+				KdPrint(("WriteFile API EVENT\n"));
 				ULONG allocSize = 0;
 
 				auto WriteFile = (WriteFileParams*)(buffer + sizeof(ApiMon));
@@ -1405,7 +1453,7 @@ bool CheckLockedRegistryKey(LIST_ENTRY* LockedKeysListHead, PCUNICODE_STRING Key
 	
 	BlockedPathNode* curr = CONTAINING_RECORD(head->Entry.Flink, BlockedPathNode, Entry);
 	while ((uintptr_t)curr != (uintptr_t)&g_Struct.LockedRegHead) {
-		KdPrint(("Checking if %ws is blocked by rule --> %ws\n", KeyName->Buffer, curr->Path.Buffer));
+		//KdPrint(("Checking if %ws is blocked by rule --> %ws\n", KeyName->Buffer, curr->Path.Buffer));
 		if (!RtlCompareUnicodeString(&curr->Path, KeyName, TRUE)) {
 			return true;
 		}
@@ -1452,7 +1500,7 @@ NTSTATUS OnRegistryNotify(PVOID context, PVOID arg1, PVOID arg2)
 			// WE WILL TRANSLATE EACH DRIVER REGISTRY PATH TO A USERMODE PATH AND THEN COMPARE TO THE PROTECTED KEYS
 			if (NT_SUCCESS(CmCallbackGetKeyObjectIDEx(&g_Struct.RegCookie, args->Object, nullptr, &name, 0))) {
 				// filter out none-HKLM writes
-				KdPrint(("Registry Key set value: %wZ\n", name));
+				//KdPrint(("Registry Key set value: %wZ\n", name));
 				bool check = false;
 				check = CheckLockedRegistryKey(g_Struct.LockedRegHead.Flink, name);
 				if (check) {

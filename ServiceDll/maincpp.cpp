@@ -21,6 +21,7 @@ HANDLE __stdcall HookedOpenProcess(DWORD dwDesiredAccess, BOOL bInheritHandle, D
         return TrampolineOpenProcess(dwDesiredAccess, bInheritHandle, dwProcessId);
     }
 
+    BYTE* startBuf = buf;
     IrpStruct = (ApiMon*)buf;
     IrpStruct->EventType = ApiEvent::OpenProcess;
     IrpStruct->pid = GetCurrentProcessId();
@@ -34,16 +35,16 @@ HANDLE __stdcall HookedOpenProcess(DWORD dwDesiredAccess, BOOL bInheritHandle, D
 
     DWORD retBytes;
 
-    //  bool check = DeviceIoControl(
-     //     g_GlobalDriverHandle,
-     //     IOCTL_API_EVENT,
-     //     0,
-     //     0,
-     //     buf,
-     //     allocSize,
-    //      &retBytes,
-   //       0
-    //  );
+      bool check = DeviceIoControl(
+          g_GlobalDriverHandle,
+          IOCTL_API_EVENT,
+          0,
+          0,
+          startBuf,
+          allocSize,
+          &retBytes,
+          0
+      );
 
     return TrampolineOpenProcess(dwDesiredAccess, bInheritHandle, dwProcessId);
 }
@@ -72,7 +73,7 @@ HANDLE __stdcall HookedCreateFileW(LPCWSTR lpFileName, DWORD dwDesiredAccess, DW
         return TrampolineCreateFileW(lpFileName, dwDesiredAccess, dwShareMode, lpSecurityAttributes, dwCreationDisposition, dwFlagsAndAttributes, hTemplateFile);
     }
 
-
+    BYTE* startBuf = buf;
     IrpStruct = (ApiMon*)buf;
     IrpStruct->EventType = ApiEvent::CreateFileW;
     IrpStruct->pid = GetCurrentProcessId();
@@ -94,7 +95,7 @@ HANDLE __stdcall HookedCreateFileW(LPCWSTR lpFileName, DWORD dwDesiredAccess, DW
         IOCTL_API_EVENT,
         0,
         0,
-        buf,
+        startBuf,
         allocSize,
         &retBytes,
         0
@@ -121,6 +122,7 @@ BOOL __stdcall HookedReadFile(HANDLE hFile, LPVOID lpBuffer, DWORD nNumberOfByte
         return TrampolineReadFile(hFile, lpBuffer, nNumberOfBytesToRead, lpNumberOfBytesRead, lpOverlapped);
     }
 
+    BYTE* startBuf = buf;
     IrpStruct = (ApiMon*)buf;
     IrpStruct->EventType = ApiEvent::ReadFile;
     IrpStruct->pid = GetCurrentProcessId();
@@ -140,7 +142,7 @@ BOOL __stdcall HookedReadFile(HANDLE hFile, LPVOID lpBuffer, DWORD nNumberOfByte
         IOCTL_API_EVENT,
         0,
         0,
-        buf,
+        startBuf,
         allocSize,
         &retBytes,
         0
@@ -167,6 +169,7 @@ BOOL __stdcall HookedWriteFile(HANDLE hFile, LPCVOID lpBuffer, DWORD nNumberOfBy
         return TrampolineWriteFile(hFile, lpBuffer, nNumberOfBytesToWrite, lpNumberOfBytesWritten, lpOverlapped);
     }
 
+    BYTE* startBuf = buf;
     IrpStruct = (ApiMon*)buf;
     IrpStruct->EventType = ApiEvent::WriteFile;
     IrpStruct->pid = GetCurrentProcessId();
@@ -189,7 +192,7 @@ BOOL __stdcall HookedWriteFile(HANDLE hFile, LPCVOID lpBuffer, DWORD nNumberOfBy
         IOCTL_API_EVENT,
         0,
         0,
-        buf,
+        startBuf,
         allocSize,
         &retBytes,
         0
