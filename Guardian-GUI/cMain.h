@@ -15,6 +15,11 @@ struct DataItem {
 	T Data;
 };
 
+template<typename T>
+struct ApiDataItem : DataItem<T> {
+	DWORD pid;
+};
+
 
 // wxFrame is basically a form
 class cMain : public wxFrame
@@ -40,7 +45,6 @@ public:
 	wxComboBox* userChoicesAddBlockedFile = nullptr;
 	int userChoicesAddBlockedFileId = 4;
 	std::vector<std::wstring> validUsers;
-
 
 	wxListBox* ScanResults = nullptr;
 	int ScanResultsId = 5;
@@ -75,6 +79,8 @@ public:
 	wxTextCtrl* stopApiMonitorTxtBox = nullptr;
 	int stopApiMonitorTxtBoxId = 15;
 
+	wxListBox* apiEventFeed = nullptr;
+	int apiEventFeedId = 16;
 
 
 	wxGauge* m_statBar1 = nullptr;						// WE WILL USE THIS LATER TO GAUGE SCAN PROGRESS
@@ -100,12 +106,18 @@ public:
 	void YaraScanFile(wxCommandEvent& evt);
 	void YaraScanProcess(wxCommandEvent& evt);
 	void DisplayInfo(BYTE* buffer, DWORD size);
+	void FormatApiEvents(BYTE* buffer, DWORD size);
 	
 
 
 // PRIVATE FUNCTIONS
 private:
+	//THREADS
 	static void displayEventThread(cMain* main);
+	static void displayApiEventThread(cMain* main);
+
+
+	// PRIVATE HELPER FUNCTIONS
 	void initUserArray(std::vector<std::wstring> users);
 	bool CheckValidUser();
 	bool CheckValidRegistryKey(std::wstring RegKey);
@@ -114,11 +126,14 @@ private:
 	void PrintYaraScanProcess(std::vector<std::string> matchedRules, std::string ProcName, DWORD processId);
 	std::string UserRegistryToKernelRegistry(std::string UserRegistryKey);
 	bool PidAlreadyMonitored(DWORD pid);
+	void DisplayApiEvents();
+
 
 // PRIVATE VARIABLES
 private: 
 	const wchar_t* BlockedFilePathConfig = L"C:\\Program Files\\Guardian\\conf\\paths.conf";
 	const wchar_t* LockedRegistryPathConfig = L"C:\\Program Files\\Guardian\\conf\\reg.conf";
 	PListHeader MonitoredProcs;
+	PListHeader ApiEvents;
 };
 

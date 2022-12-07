@@ -70,26 +70,11 @@ struct WriteFileParams {
 
 
 
-template<class T>
-struct HookDriver {
-	HookDriver(std::vector<HookFuncs>& InitStruct) : HookClassType(HookClass) {
-		HookClassType.InitHooks(InitStruct);
-	}
-
-	~HookDriver() {
-		HookClassType.RemoveHooks();
-	}
-
-private:
-	T& HookClassType;
-};
-
-template<class T>
+ 
 class Manager
 {
 public:
-	Manager<Hook::x64>(std::vector<HookFuncs>& InitStuct, SLIST_HEADER& GlobalLinkedList, HANDLE& GlobalDriverHandle);
-	Manager<Hook::x86>(std::vector<HookFuncs>& InitStuct, SLIST_HEADER& GlobalLinkedList, HANDLE& GlobalDriverHandle);
+	Manager(std::vector<HookFuncs>& InitStuct, SLIST_HEADER& GlobalLinkedList, HANDLE& GlobalDriverHandle);
 	~Manager();
 
 private:
@@ -97,15 +82,14 @@ private:
 
 
 public:
-	static bool StartupSuccess;
+	bool StartupSuccess;
 	static bool ExitVar;
-
-private:
 	SLIST_HEADER ApiEventSLL;
-	HookDriver<T> HookEngine;
-	static HANDLE hCommandThread;
+	Hook::x64 HookEngine64;
+	Hook::x86 HookEngine86;
+	HANDLE hCommandThread;
 	static HANDLE hDriverFile;
-	
+	BOOL wow64;
 
 };
 

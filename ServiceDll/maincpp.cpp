@@ -1,20 +1,72 @@
 #include "Manager.h"
 #include <string>
+#include <iostream>
+
+
+SLIST_HEADER g_ApiEvents;
+HANDLE g_GlobalDriverHandle;
+
+HANDLE(__stdcall* TrampolineOpenProcess)(DWORD dwDesiredAccess, BOOL bInheritHandle, DWORD dwProcessId);
+
+HANDLE __stdcall HookedOpenProcess(DWORD dwDesiredAccess, BOOL bInheritHandle, DWORD dwProcessId)
+{
+    printf("OpenProcess\n");
+    ApiMon* IrpStruct;
+
+    DWORD allocSize = sizeof(ApiMon);
+    allocSize += sizeof(OpenProcessParams);
+
+    BYTE* buf = RAII::NewBuffer(allocSize).Get();
+    if (!buf) {
+        return TrampolineOpenProcess(dwDesiredAccess, bInheritHandle, dwProcessId);
+    }
+
+    IrpStruct = (ApiMon*)buf;
+    IrpStruct->EventType = ApiEvent::OpenProcess;
+    IrpStruct->pid = GetCurrentProcessId();
+    IrpStruct->size = 0;
+    buf += sizeof(ApiMon);
+
+    OpenProcessParams* Params = (OpenProcessParams*)buf;
+    Params->dwDesiredAccess = dwDesiredAccess;
+    Params->bInheritHandle = bInheritHandle;
+    Params->dwProcessId = dwProcessId;
+
+    DWORD retBytes;
+
+    //  bool check = DeviceIoControl(
+     //     g_GlobalDriverHandle,
+     //     IOCTL_API_EVENT,
+     //     0,
+     //     0,
+     //     buf,
+     //     allocSize,
+    //      &retBytes,
+   //       0
+    //  );
+
+    return TrampolineOpenProcess(dwDesiredAccess, bInheritHandle, dwProcessId);
+}
+
+
+
 
 
 HANDLE(__stdcall* TrampolineCreateFileW)(LPCWSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode, LPSECURITY_ATTRIBUTES lpSecurityAttributes,
     DWORD dwCreationDisposition, DWORD dwFlagsAndAttributes, HANDLE hTemplateFile);
 
 HANDLE __stdcall HookedCreateFileW(LPCWSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode, LPSECURITY_ATTRIBUTES lpSecurityAttributes,
-    DWORD dwCreationDisposition, DWORD dwFlagsAndAttributes, HANDLE hTemplateFile) 
+    DWORD dwCreationDisposition, DWORD dwFlagsAndAttributes, HANDLE hTemplateFile)
 {
+    printf("CreateFileW\n");
+
     ApiMon* IrpStruct;
     std::wstring File(lpFileName);
 
     DWORD allocSize = sizeof(ApiMon);
     allocSize = sizeof(CreateFileWParameters);
     allocSize += File.size() * 2;
-   
+
     BYTE* buf = RAII::NewBuffer(allocSize).Get();
     if (!buf) {
         return TrampolineCreateFileW(lpFileName, dwDesiredAccess, dwShareMode, lpSecurityAttributes, dwCreationDisposition, dwFlagsAndAttributes, hTemplateFile);
@@ -36,7 +88,6 @@ HANDLE __stdcall HookedCreateFileW(LPCWSTR lpFileName, DWORD dwDesiredAccess, DW
     Params->dwCreationDisposition = dwCreationDisposition;
     Params->dwFlagsAndAttributes = dwFlagsAndAttributes;
     Params->hTemplateFile = hTemplateFile;
-
     DWORD retBytes;
     bool check = DeviceIoControl(
         g_GlobalDriverHandle,
@@ -48,56 +99,18 @@ HANDLE __stdcall HookedCreateFileW(LPCWSTR lpFileName, DWORD dwDesiredAccess, DW
         &retBytes,
         0
     );
-    
+
     return TrampolineCreateFileW(lpFileName, dwDesiredAccess, dwShareMode, lpSecurityAttributes, dwCreationDisposition, dwFlagsAndAttributes, hTemplateFile);
-}
-
-
-HANDLE(__stdcall* TrampolineOpenProcess)(DWORD dwDesiredAccess, BOOL bInheritHandle, DWORD dwProcessId);
-
-HANDLE __stdcall HookedOpenProcess(DWORD dwDesiredAccess, BOOL bInheritHandle, DWORD dwProcessId) 
-{
-    ApiMon* IrpStruct;
-
-    DWORD allocSize = sizeof(ApiMon);
-    allocSize += sizeof(OpenProcessParams);
-
-    BYTE* buf = RAII::NewBuffer(allocSize).Get();
-    if (!buf) {
-        return TrampolineOpenProcess(dwDesiredAccess, bInheritHandle, dwProcessId);
-    }
-    
-    IrpStruct = (ApiMon*)buf;
-    IrpStruct->EventType = ApiEvent::OpenProcess;
-    IrpStruct->pid = GetCurrentProcessId();
-    IrpStruct->size = 0;
-    buf += sizeof(ApiMon);
-
-    OpenProcessParams* Params = (OpenProcessParams*)buf;
-    Params->dwDesiredAccess = dwDesiredAccess;
-    Params->bInheritHandle = bInheritHandle;
-    Params->dwProcessId = dwProcessId;
-
-    DWORD retBytes;
-    bool check = DeviceIoControl(
-        g_GlobalDriverHandle,
-        IOCTL_API_EVENT,
-        0,
-        0,
-        buf,
-        allocSize,
-        &retBytes,
-        0
-    );
-
-    return TrampolineOpenProcess(dwDesiredAccess, bInheritHandle, dwProcessId);
 }
 
 
 BOOL(__stdcall* TrampolineReadFile)(HANDLE hFile, LPVOID lpBuffer, DWORD nNumberOfBytesToRead, LPDWORD lpNumberOfBytesRead, LPOVERLAPPED lpOverlapped);
 
-BOOL __stdcall HookedReadFile(HANDLE hFile, LPVOID lpBuffer, DWORD nNumberOfBytesToRead, LPDWORD lpNumberOfBytesRead, LPOVERLAPPED lpOverlapped) 
+BOOL __stdcall HookedReadFile(HANDLE hFile, LPVOID lpBuffer, DWORD nNumberOfBytesToRead, LPDWORD lpNumberOfBytesRead, LPOVERLAPPED lpOverlapped)
 {
+
+    printf("ReadFile\n");
+
     ApiMon* IrpStruct;
 
     DWORD allocSize = sizeof(ApiMon);
@@ -141,6 +154,7 @@ BOOL(__stdcall* TrampolineWriteFile)(HANDLE hFile, LPCVOID lpBuffer, DWORD nNumb
 
 BOOL __stdcall HookedWriteFile(HANDLE hFile, LPCVOID lpBuffer, DWORD nNumberOfBytesToWrite, LPDWORD lpNumberOfBytesWritten, LPOVERLAPPED lpOverlapped)
 {
+    printf("WriteFile\n");
     ApiMon* IrpStruct;
 
     DWORD allocSize = sizeof(ApiMon);
@@ -180,42 +194,47 @@ BOOL __stdcall HookedWriteFile(HANDLE hFile, LPCVOID lpBuffer, DWORD nNumberOfBy
         &retBytes,
         0
     );
-   
+
     return TrampolineWriteFile(hFile, lpBuffer, nNumberOfBytesToWrite, lpNumberOfBytesWritten, lpOverlapped);
 }
+
 
 std::vector<HookFuncs> InitHooks = {
     {(void*)&TrampolineCreateFileW, (void*)HookedCreateFileW, "Kernel32.dll", "CreateFileW"},
     {(void*)&TrampolineOpenProcess, (void*)HookedOpenProcess, "Kernel32.dll", "OpenProcess"},
-    {(void*)&TrampolineReadFile, (void*)HookedReadFile, "Kernel32.dll", "ReadFile"},
-    {(void*)&TrampolineWriteFile, (void*)HookedWriteFile, "Kernel32.dll", "WriteFile"}
+    {(void*)&TrampolineWriteFile, (void*)HookedWriteFile, "Kernel32.dll", "WriteFile"},
+     {(void*)&TrampolineReadFile, (void*)HookedReadFile, "Kernel32.dll", "ReadFile"}
 };
 
 
-SLIST_HEADER g_ApiEvents;
-HANDLE g_GlobalDriverHandle;
+
+
+
+
 
 
 int MainThread(HMODULE hModule) {
 
-#ifdef _WIN64
-    Manager<Hook::x64> Manager(InitHooks, g_ApiEvents, g_GlobalDriverHandle);
-#else
-    Manager<Hook::x86> Manager(InitHooks, g_ApiEvents, g_GlobalDriverHandle);
-#endif
-    
-    if (!Manager.StartupSuccess) {
-        FreeLibraryAndExitThread(hModule, 0);
+    AllocConsole();
+    FILE* f;
+    freopen_s(&f, "CONOUT$", "w", stdout);
+
+    Manager manager(InitHooks, g_ApiEvents, g_GlobalDriverHandle);
+
+
+    if (!manager.StartupSuccess) {
+        printf("failed startup\n");
+        //FreeLibraryAndExitThread(hModule, 0);
     }
 
+
     while (true) {
-        if (Manager.ExitVar) {
-            FreeLibraryAndExitThread(hModule, 0);
+        if (GetAsyncKeyState(VK_NUMPAD0) & 1) {
+
+
         }
-
-
-
-
+        printf("running...\n");
+        Sleep(2000);
     }
 
 

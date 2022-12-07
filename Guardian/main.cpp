@@ -836,7 +836,7 @@ NTSTATUS IoControl(PDEVICE_OBJECT, PIRP Irp) {
 	auto count = 0;
 
 	KdPrint(("Control Code: 0x%8X\n", stack->Parameters.DeviceIoControl.IoControlCode));
-	
+	KdPrint(("IOCTL_API_EVENT: 0x%8X\n", IOCTL_API_EVENT));
 	switch (stack->Parameters.DeviceIoControl.IoControlCode)
 	{
 
@@ -1102,6 +1102,27 @@ NTSTATUS IoControl(PDEVICE_OBJECT, PIRP Irp) {
 					ExFreePool(info);
 					break;
 				}
+
+				case TaskType::StartApiMonitor:
+				{
+					auto info = CONTAINING_RECORD(entry, WorkItem<ApiMonitorJob>, Entry);
+					auto size = info->Data.Size;
+
+					if (len < size) {
+						InsertHeadList(&g_Struct.ServiceWorkItemsHead, entry);
+						break;
+					}
+
+					g_Struct.ServiceWorkItemsCount--;
+					memcpy(buffer, &info->Data, size);
+					len -= size;
+					buffer += size;
+					count += size;
+
+					ExFreePool(info);
+					break;
+				}
+
 				default:
 					KdPrint(("Invalid type found when reading Task items to service\n"));
 					break;
@@ -1170,7 +1191,7 @@ NTSTATUS IoControl(PDEVICE_OBJECT, PIRP Irp) {
 
 	case IOCTL_READ_COMAPI:
 	{
-		ULONG Pid = (ULONG)PsGetCurrentProcessId();
+		ULONG Pid = (ULONG)HandleToUlong(PsGetCurrentProcessId());
 		if (!Pid) {
 			break;
 		}
@@ -1233,8 +1254,17 @@ NTSTATUS IoControl(PDEVICE_OBJECT, PIRP Irp) {
 		break;
 	}
 
+	case IOCTL_READ_APIEVENT:
+	{
+		
+
+
+		break;
+	}
+
 	case IOCTL_API_EVENT:
 	{
+		KdPrint(("API EVENT\n"));
 		NT_ASSERT(Irp->MdlAddress);
 		//auto len = stack->Parameters.DeviceIoControl.OutputBufferLength;
 		auto buffer = (UCHAR*)MmGetSystemAddressForMdlSafe(Irp->MdlAddress, NormalPagePriority);
@@ -1325,7 +1355,7 @@ NTSTATUS IoControl(PDEVICE_OBJECT, PIRP Irp) {
 				}
 
 				auto apimon = (WorkItem<ApiMon>*)buf;
-				apimon->Data.size = sizeof(ApiMon) + sizeof(WriteFileParams);					// data only
+				apimon->Data.size = sizeof(ApiMon) + sizeof(WriteFileParams) + WriteFile->numCopyBytes;					// data only
 				apimon->Data.pid = mon->pid;
 				apimon->Data.EventType = ApiEvent::WriteFile;
 				memcpy(buf + sizeof(WorkItem<ApiMon>), buffer + sizeof(ApiMon), sizeof(ReadFileParams));

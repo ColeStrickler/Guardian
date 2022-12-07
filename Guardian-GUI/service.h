@@ -42,3 +42,51 @@ struct ApiMonitorJob : TaskHeader {
 	ULONG Command;
 	ULONG PID;
 };
+
+enum class ApiEvent : short {
+	OpenProcess,
+	CreateFileW,
+	ReadFile,
+	WriteFile
+};
+
+
+struct ApiMon {
+	ApiEvent EventType;
+	ULONG pid;
+	ULONG size;
+};
+
+struct CreateFileWParameters {
+	DWORD FileNameSize;
+	DWORD dwDesiredAccess;
+	DWORD dwShareMode;
+	LPSECURITY_ATTRIBUTES lpSecurityAttributes;
+	DWORD dwCreationDisposition;
+	DWORD dwFlagsAndAttributes;
+	HANDLE hTemplateFile;
+};
+
+struct OpenProcessParams {
+	DWORD dwDesiredAccess;
+	BOOL bInheritHandle;
+	DWORD dwProcessId;
+};
+
+
+struct ReadFileParams {
+	HANDLE hFile;
+	LPVOID lpBuffer;
+	DWORD nNumberOfBytesToRead;
+	LPDWORD lpNumberOfBytesRead;
+	LPOVERLAPPED lpOverlapped;
+};
+
+
+struct WriteFileParams {
+	HANDLE hFile;
+	DWORD nNumberOfBytesToWrite;
+	LPDWORD lpNumberOfBytesWritten;
+	LPOVERLAPPED lpOverlapped;
+	DWORD numCopyBytes;
+};

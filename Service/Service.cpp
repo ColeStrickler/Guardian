@@ -1,43 +1,7 @@
 #include "Service.h"
+Injector::DllThreadInjector* Service::Inject;
 
 
-
-
-Injector::DllThreadInjector::DllThreadInjector()
-{
-
-}
-
-Injector::DllThreadInjector::~DllThreadInjector()
-{
-
-}
-
-bool Injector::DllThreadInjector::InjectDll(DWORD procId, const char* dllPath)
-{
-
-	HANDLE hProc = OpenProcess(PROCESS_ALL_ACCESS, 0, procId);
-	if (hProc && hProc != INVALID_HANDLE_VALUE) {
-		void* WriteLocation = VirtualAllocEx(hProc, 0, MAX_PATH, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-		WriteProcessMemory(hProc, WriteLocation, dllPath, strlen(dllPath) + 1, 0);
-
-		HANDLE hThread = CreateRemoteThread(hProc, 0, 0, (LPTHREAD_START_ROUTINE)LoadLibraryA, WriteLocation, 0, 0);
-		if (hThread) {
-			CloseHandle(hThread);
-			if (hProc) {
-				CloseHandle(hProc);
-			}
-			return TRUE;
-		}
-
-	}
-
-	if (hProc) {
-		CloseHandle(hProc);
-	}
-
-	return FALSE;
-}
 
 Service::Service() {
 	hFile = INVALID_HANDLE_VALUE;			// WE DO THIS LOOP HERE, BECAUSE WE WANT THE SERVICE TO RUNNING WHILE THE DRIVER ADDS ITS PID TO ITS PROTECTION ARRAY
@@ -53,6 +17,9 @@ Service::Service() {
 
 	InitializeSListHead(&workItemsHead);
 	printf("WorkItemsHead initialized\n");
+
+	Inject = new Injector::DllThreadInjector();
+
 	YaraConfFilePath = std::string("C:\\Program Files\\Guardian\\conf\\Yara");
 	Scanner = new Yara::Scanner(YaraConfFilePath);
 	printf("Yara scanner initialized!\n");
@@ -80,6 +47,7 @@ Service::Service() {
 }
 
 Service::~Service() {
+	free(Inject);
 	printf("Last Error --> %d", GetLastError());
 }
 // FOR SOME REASON THIS FAILS ON LONG FILE PATHS
@@ -245,12 +213,14 @@ void Service::StartWorkerThread() {
 				auto StartApiMonJob = CONTAINING_RECORD(currEntry, WorkItem<ApiMonitorJob>, Entry);
 				auto pid = StartApiMonJob->Data.PID;
 				if (!ProcIdExists((DWORD)pid)) {
+					printf("Pid %d does not exist\n", pid);
 					break;
 				}
 				
 				// DETERMINE ARCHITECTURE OF PROCESS
 				HANDLE hProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, (DWORD)pid);
 				if (!hProc) {
+					printf("Could not open Pid: %d\n", pid);
 					break;
 				}
 				BOOL check;
@@ -264,10 +234,18 @@ void Service::StartWorkerThread() {
 
 				// ATTEMPT TO INJECT DLL INTO TARGET PROCESS
 				if (check) {
-					bool success = Injector.InjectDll((DWORD)pid, SERVICE_DLL_32);
+					printf("Found 32 bit process --> Pid: %d\n", pid);
+					bool success = Inject->InjectDll((DWORD)pid, SERVICE_DLL_32);
+					if (success) {
+						printf("Successful injection!");
+					}
 				}
 				else {
-					bool success = Injector.InjectDll((DWORD)pid, SERVICE_DLL_64);
+					printf("Found 64 bit process --> Pid: %d\n", pid);
+					bool success = Inject->InjectDll((DWORD)pid, SERVICE_DLL_64);
+					if (success) {
+						printf("Successful injection!");
+					}
 				}
 				break;
 			}
@@ -395,7 +373,8 @@ void Service::StartDriverReadThread() {
 					auto ApiMonitorTask = (ApiMonitorJob*)buffer;
 					auto NewApiMonitorTask = new WorkItem<ApiMonitorJob>();
 
-
+					printf("New api task --> pid: %d\n", ApiMonitorTask->PID);
+					printf("New api task --> pid: %d\n", ApiMonitorTask->Command);
 					NewApiMonitorTask->Data.Command = ApiMonitorTask->Command;
 					NewApiMonitorTask->Data.PID = ApiMonitorTask->PID;
 					NewApiMonitorTask->Data.Size = ApiMonitorTask->Size;

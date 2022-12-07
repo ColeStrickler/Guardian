@@ -101,6 +101,144 @@ void cMain::PrintYaraScanFile(std::vector<std::string> matchedRules, std::string
 }
 
 
+void cMain::displayApiEventThread(cMain* main)
+{
+    while (true) {
+        BYTE buffer[1 << 16];
+
+        if (main->hFile == INVALID_HANDLE_VALUE) {
+            main->AlertFeed->Append(wxString("Invalid file handle to driver"));
+            continue;
+        }
+        DWORD bytes;
+        if (!DeviceIoControl(
+            main->hFile,
+            IOCTL_READ_APIEVENT,
+            0,
+            0,
+            buffer,
+            DWORD(1 << 16),
+            &bytes,
+            nullptr         )) {
+            main->apiEventFeed->AppendString(wxString("Handle to driver file could not be read."));
+            continue;
+        }
+        if (bytes != 0) {
+            main->FormatApiEvents(buffer, bytes);
+        }
+
+        Sleep(200);
+    }
+}
+
+void cMain::FormatApiEvents(BYTE* buffer, DWORD size)
+{
+    auto count = size;
+    while (count > 0) {
+        auto header = (ApiMon*)buffer;
+        switch (header->EventType) {
+            case ApiEvent::CreateFileW:
+            {
+                auto cfw = (CreateFileWParameters*)(buffer + sizeof(ApiMon));
+                auto DataItem = new ApiDataItem<CreateFileWParameters>();
+
+                auto pid = header->pid;
+
+                auto dwCreationDisposition = cfw->dwCreationDisposition;
+                auto dwDesiredAccess = cfw->dwDesiredAccess;
+                auto dwFlagsAndAttributes = cfw->dwFlagsAndAttributes;
+                auto dwShareMode = cfw->dwShareMode;
+                auto FileNameSize = cfw->FileNameSize;
+                auto hTemplateFile = cfw->hTemplateFile;
+                auto lpSecurityAttributes = cfw->lpSecurityAttributes;
+
+                if (ApiEvents->EntryCount > 1024) {
+                    PopEntry(ApiEvents);
+                }
+                PushEntry(ApiEvents, &DataItem->Entry);
+
+                AlertFeed->AppendString(wxString("CreateFileW"));
+                break;
+            }
+
+            case ApiEvent::OpenProcess:
+            {
+                auto op = (OpenProcessParams*)(buffer + sizeof(ApiMon));
+                auto DataItem = new ApiDataItem<OpenProcessParams>();
+
+                DataItem->pid = header->pid;
+
+                DataItem->Data.bInheritHandle = op->bInheritHandle;
+                DataItem->Data.dwDesiredAccess = op->dwDesiredAccess;
+                DataItem->Data.dwProcessId = op->dwProcessId;
+
+                if (ApiEvents->EntryCount > 1024) {
+                    PopEntry(ApiEvents);
+                }
+                PushEntry(ApiEvents, &DataItem->Entry);
+
+                AlertFeed->AppendString(wxString("OpenProcess"));
+                break;
+            }
+
+            case ApiEvent::ReadFile:
+            {
+                auto rf = (ReadFileParams*)(buffer + sizeof(ApiMon));
+
+                auto DataItem = new ApiDataItem<ReadFileParams>();
+
+                DataItem->pid = header->pid;
+
+                DataItem->Data.hFile = rf->hFile;
+                DataItem->Data.lpBuffer = rf->lpBuffer;
+                DataItem->Data.lpNumberOfBytesRead = rf->lpNumberOfBytesRead;
+                DataItem->Data.nNumberOfBytesToRead = rf->nNumberOfBytesToRead;
+                DataItem->Data.lpOverlapped = rf->lpOverlapped;
+
+                if (ApiEvents->EntryCount > 1024) {
+                    PopEntry(ApiEvents);
+                }
+                PushEntry(ApiEvents, &DataItem->Entry);
+                
+                AlertFeed->AppendString(wxString("ReadFile"));
+                break;
+            }
+
+            case ApiEvent::WriteFile:
+            {
+                auto wf = (WriteFileParams*)(buffer + sizeof(ApiMon));
+                auto WriteData = (BYTE*)(buffer + sizeof(ApiMon) + sizeof(WriteFileParams));
+                auto DataItem = new ApiDataItem<WriteFileParams>();
+                auto numCopyBytes = wf->numCopyBytes;
+
+                DataItem->pid = header->pid;
+
+                DataItem->Data.hFile = wf->hFile;
+                DataItem->Data.lpNumberOfBytesWritten = wf->lpNumberOfBytesWritten;
+                DataItem->Data.lpOverlapped = wf->lpOverlapped;
+                DataItem->Data.nNumberOfBytesToWrite = wf->nNumberOfBytesToWrite;
+                
+                if (ApiEvents->EntryCount > 1024) {
+                    PopEntry(ApiEvents);
+                }
+                PushEntry(ApiEvents, &DataItem->Entry);
+
+                AlertFeed->AppendString(wxString("WriteFile"));
+                break;
+            }
+
+            default:
+                break;
+
+
+        }
+        buffer += header->size;
+        count -= header->size;
+    }
+
+
+
+}
 
 
 void cMain::DisplayInfo(BYTE* buffer, DWORD size) 
@@ -108,38 +246,20 @@ void cMain::DisplayInfo(BYTE* buffer, DWORD size)
     auto count = size;
     while (count > 0) {
         auto header = (Header*)buffer;
-       // if ((int)header->Type != 0) {
-      //      m_list1->AppendString(wxString(std::to_string((DWORD)header->Type).c_str()));
-       // }
-       // else {
-          //  m_list1->AppendString(wxString("Invalid header type"));
-       // }
-        
+
         switch (header->Type) {
             case ItemType::ProcessExit:
             {
-                
-                    std::string time = DisplayTime(header->Time);
-                    // auto info = (ProcessExitInfo*)buffer;
-                    // printf("[*] {PROCESS EXIT} |PID-->%d|\n", info->ProcessId);
-                    break;
+                break;
             }
 
             case ItemType::ProcessCreate:
             {
-                // DisplayTime(header->Time);
-                // auto info = (ProcessCreateInfo*)buffer;
-               //  std::wstring commandLine((WCHAR*)(buffer + info->CommandLineOffset), info->CommandLineLength);
-               //  std::wstring fileImage((WCHAR*)(buffer + info->ImageFileNameOffset), info->ImageFileNameLength);
-              //   printf("offset: %d\n", info->ImageFileNameOffset);
-                // printf("[*] {PROCESS CREATION} |PID-->%d|IMAGEFILE-->%ws|CMDLINE-->%ws|\n", info->ProcessId, fileImage.c_str(), commandLine.c_str());
-                // break;
                 break;
             }
 
             case ItemType::RemoteThreadCreate:
             {
-               // m_list1->AppendString(wxString("RemoteThreadCreate"));
                 std::string time = DisplayTime(header->Time);
                 auto info = (RemoteThreadAlert*)buffer;
                 auto targetId = info->ProcessId;
@@ -150,7 +270,6 @@ void cMain::DisplayInfo(BYTE* buffer, DWORD size)
                 std::string ret(buf);
                 wxString logString = wxString(ret.c_str());
                 AlertFeed->AppendString(logString);
-               // m_list1->AppendString(wxString("log"));
                 break;
             }
 
@@ -278,6 +397,7 @@ cMain::cMain() : wxFrame(nullptr, wxID_ANY, "Guardian", wxPoint(30, 30), wxSize(
 
     // LINKED LIST INITIALIZATION
     InitializeListHeader(&this->MonitoredProcs);
+    InitializeListHeader(&this->ApiEvents);
     
 
     // ADD BLOCKED FILE         wxPoint(410, 20), wxSize(200, 200), userChoices
@@ -305,7 +425,7 @@ cMain::cMain() : wxFrame(nullptr, wxID_ANY, "Guardian", wxPoint(30, 30), wxSize(
 
     // STOP API MONITOR
     stopApiMonitorBtn = new wxButton(this, 10006, "Stop Api Monitor", wxPoint(10, 120), wxSize(200, 20));
-    startApiMonitorTxtBox = new wxTextCtrl(this, wxID_ANY, "<pid>", wxPoint(210, 120), wxSize(200, 20));
+    stopApiMonitorTxtBox = new wxTextCtrl(this, wxID_ANY, "<pid>", wxPoint(210, 120), wxSize(200, 20));
 
     // EVENT/ALERT FEED
 	AlertFeed = new wxListBox(this, wxID_ANY, wxPoint(10, 210), wxSize(500, 400));
@@ -350,7 +470,10 @@ bool cMain::PidAlreadyMonitored(DWORD pid)
 void cMain::StartApiMonitor(wxCommandEvent& evt)
 {
    BOOL success = true;
-   DWORD pid = atoi(std::string(startApiMonitorTxtBox->GetValue().mb_str()).c_str());
+   DWORD pid = atoi(startApiMonitorTxtBox->GetValue().mb_str().data());
+   if (!pid) {
+       MessageBoxA(NULL, "PID zero", "Error", MB_ICONERROR | MB_DEFBUTTON1);
+   }
    if (!ProcIdExists(pid)) {
        MessageBoxA(NULL, "PID does not exist.", "Error", MB_ICONERROR | MB_DEFBUTTON1);
        evt.Skip();
@@ -402,7 +525,8 @@ void cMain::StartApiMonitor(wxCommandEvent& evt)
 void cMain::StopApiMonitor(wxCommandEvent& evt)
 {
     BOOL success = true;
-    DWORD pid = atoi(std::string(stopApiMonitorTxtBox->GetValue().mb_str()).c_str());
+    DWORD pid = atoi(startApiMonitorTxtBox->GetValue().mb_str().data());
+    
     if (!ProcIdExists(pid)) {
         MessageBoxA(NULL, "PID does not exist.", "Error", MB_ICONERROR | MB_DEFBUTTON1);
         evt.Skip();

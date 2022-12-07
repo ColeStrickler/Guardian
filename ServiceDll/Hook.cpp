@@ -51,9 +51,12 @@ void Hook::x86::InitHooks(std::vector<HookFuncs>& hookFuncs)
 	for (auto& hook : hookFuncs) {
 		void* TgtFunc = (void*)GetFuncAddress(hook.dllName, hook.funcName);
 		if (!TgtFunc) {
+			//printf("Did not find address\n");
 			continue;
 		}
+		//	printf("Installing hook for %s at address: 0x%lx, HookFunction: 0x%lx, Trampoline: 0x%lx\n", hook.funcName, TgtFunc, hook.HookFunction, *(void**)hook.TrampolineFunc);
 		InstallHook(TgtFunc, hook.HookFunction, (void**)hook.TrampolineFunc);
+		//	printf("Resulting hook for %s at address: 0x%lx, HookFunction: 0x%lx, Trampoline: 0x%lx\n", hook.funcName, TgtFunc, hook.HookFunction, *(void**)hook.TrampolineFunc);
 	}
 
 }
@@ -146,13 +149,19 @@ void Hook::x86::InstallHook(void* func2hook, void* payloadFunc, void** trampolin
 	LPVOID trampolineMem;
 	BYTE* check = new BYTE[5];
 	memcpy(check, func2hook, 5);
+	//for (int i = 0; i < 5; i++) {
+	//	printf("%x,", check[i]);
+	//}
+	//Sleep(5000);
 	X86Instructions Instructions = StealBytes(func2hook);
 	trampolineMem = VirtualAlloc(0, 512, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
 	if (!trampolineMem) {
 		return;
 	}
 	hook.PageAddress = (DWORD)trampolineMem;
+	//printf("trampoline before: %lx\n", *trampolinePtr);
 	*trampolinePtr = trampolineMem;
+	//printf("trampoline after: %lx\n", *trampolinePtr);
 	WriteTrampoline(func2hook, trampolineMem, Instructions);
 
 	BYTE HookJmp[] = { 0xE9, 0x00, 0x00, 0x00, 0x00 };
@@ -177,6 +186,10 @@ void Hook::x86::RemoveHooks()
 	for (auto& hook : Hooks) {
 		auto& inst = hook.StolenBytes;
 		VirtualProtect((void*)hook.HookedFunctionAddress, 512, PAGE_EXECUTE_READWRITE, &oldProtect);
+		//printf("\nCopying %d bytes back..\n", inst.numBytes);
+		//for (int i = 0; i < inst.numBytes; i++) {
+		//	printf("0x%x,", inst.OriginalInstructions[i]);
+		//}
 		memcpy((void*)hook.HookedFunctionAddress, inst.OriginalInstructions, inst.numBytes);
 		free(inst.instructions);
 		free(inst.OriginalInstructions);
@@ -211,18 +224,21 @@ void Hook::x64::InstallHook(void* func2hook, void* payloadFunc, void** trampolin
 
 	uint32_t trampolineSize = BuildTrampoline(func2hook, hookMemory);
 	*trampolinePtr = hookMemory;
+	printf("Trampoline is built at %llx\n", *trampolinePtr);
 	// Increase Global ptr
 	PageAddress += trampolineSize += 0x30;
 
 	//create the relay function
 	void* relayFuncMemory = (char*)hookMemory + trampolineSize;
 	WriteAbsoluteJump64(relayFuncMemory, payloadFunc); //write relay func instructions
+	//printf("Absolute Jump is written\n");
 
 	//install the hook
 	uint8_t jmpInstruction[5] = { 0xE9, 0x0, 0x0, 0x0, 0x0 };
 	const int32_t relAddr = (int32_t)relayFuncMemory - ((int32_t)func2hook + sizeof(jmpInstruction));
 	memcpy(jmpInstruction + 1, &relAddr, 4);
 	memcpy(func2hook, jmpInstruction, sizeof(jmpInstruction));
+	//printf("finished installing hook!\n");
 }
 
 void Hook::x64::WriteAbsoluteJump64(void* absJumpMemory, void* addrToJumpTo)
@@ -520,6 +536,7 @@ uint32_t Hook::x64::BuildTrampoline(void* func2hook, void* dstMemForTrampoline)
 		cs_insn& inst = stolenInstrs.instructions[i];
 		if (inst.id >= X86_INS_LOOP && inst.id <= X86_INS_LOOPNE)
 		{
+			//printf("loop");
 			return 0; //bail out on loop instructions, I don't have a good way of handling them 
 		}
 
@@ -539,11 +556,13 @@ uint32_t Hook::x64::BuildTrampoline(void* func2hook, void* dstMemForTrampoline)
 		{
 			RelocateInstruction(&inst, stolenByteMem);
 		}
+		//printf("Writing %d bytes to trampoline memory--> %llx\n", inst.size, stolenByteMem);
 		memcpy(stolenByteMem, inst.bytes, inst.size);
 		stolenByteMem += inst.size;
 	}
 
 	WriteAbsoluteJump64(jumpBackMem, (uint8_t*)func2hook + 5);
+	//free(stolenInstrs.instructions);
 
 	HookInfo64 HookInfo;
 	HookInfo.HookedFunctionAddress = (uintptr_t)func2hook;
@@ -580,9 +599,12 @@ void Hook::x64::InitHooks(std::vector<HookFuncs>& hookFuncs)
 	for (auto& hook : hookFuncs) {
 		void* TgtFunc = (void*)GetFuncAddress(hook.dllName, hook.funcName);
 		if (!TgtFunc) {
+			printf("Did not find address for %s\n", hook.funcName);
 			continue;
 		}
 		InstallHook(TgtFunc, hook.HookFunction, (void**)hook.TrampolineFunc);
+		printf("Installed hook for %s at address: 0x%llx, HookFunction: 0x%llx, Trampoline: 0x%llx\n", hook.funcName, TgtFunc, hook.HookFunction, hook.TrampolineFunc);
+		Sleep(2000);
 	}
 
 }
